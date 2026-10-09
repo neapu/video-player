@@ -1,0 +1,33 @@
+{
+    "version": 3,
+    "configurePresets": [{
+        "name": "Win64-Release",
+        "hidden": false,
+        "generator": "Visual Studio 17 2022",
+        "binaryDir": "${sourceDir}/build/${presetName}",
+        "cacheVariables": {
+            "CMAKE_BUILD_TYPE": "Release",
+            "CMAKE_RUNTIME_OUTPUT_DIRECTORY": "${sourceDir}/bin",
+            "CMAKE_PREFIX_PATH": "$env{Qt6_DIR}/lib/cmake",
+            "FFMPEG_DIR": "$env{FFMPEG_DIR}"
+        }
+    },{
+        "name": "Win64-Debug",
+        "inherits": "Win64-Release",
+        "hidden": false,
+        "cacheVariables": {
+            "CMAKE_BUILD_TYPE": "Debug"
+        }
+    }],
+    "buildPresets": [{
+        "name": "Win64-Release",
+        "hidden": false,
+        "configurePreset": "Win64-Release",
+        "configuration": "Release"
+    },{
+        "name": "Win64-Debug",
+        "hidden": false,
+        "configurePreset": "Win64-Debug",
+        "configuration": "Debug"
+    }]
+}
