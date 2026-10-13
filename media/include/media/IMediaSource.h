@@ -2,10 +2,24 @@
 #include <string>
 #include <vector>
 #include <functional>
+#include <expected>
 #include "IMediaFrame.h"
 
 namespace media {
 enum class Error {
+    // ==== 创建阶段 ====
+    /**
+     * @brief 打开文件失败。
+     * @note 所有文件相关问题（包括找不到文件，没有有效流等）都会返回此错误。
+     */
+    FileOpenFailed,
+    /**
+     * @brief 编码器初始化失败。
+     * @note 所有编码器相关问题都会返回此错误。
+     */ 
+    CodecInitFailed,
+
+    // ==== 运行阶段 ====
     /**
      * @brief 读取媒体数据失败。
      * @note 恢复方法：触发一次成功的 seek 操作。
@@ -57,7 +71,7 @@ public:
         std::function<void(Error)> onError{};
     };
 
-    static std::unique_ptr<IMediaSource> create(const Options& options);
+    static std::expected<std::unique_ptr<IMediaSource>, Error> create(const Options& options);
 
     virtual ~IMediaSource() = default;
 
@@ -84,6 +98,12 @@ public:
      */
     virtual SampleFormat enableAudioStream(int streamIndex, std::vector<SampleFormat> requiredSampleFormats) = 0;
 
+    /**
+     * @brief 获取指定媒体流的下一帧。
+     * @param streamIndex 媒体流索引。
+     * @return MediaFramePtr 指向下一帧的智能指针
+     * @note 正常情况下不会返回nullptr，如果返回nullptr表示发生了不可恢复的内部错误。
+     */
     virtual MediaFramePtr nextFrame(int streamIndex) = 0;
 
     virtual int64_t duration() const = 0;
