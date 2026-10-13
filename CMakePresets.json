@@ -18,6 +18,24 @@
         "cacheVariables": {
             "CMAKE_BUILD_TYPE": "Debug"
         }
+    },{
+        "name": "MacOS-Release",
+        "hidden": false,
+        "generator": "Ninja",
+        "binaryDir": "${sourceDir}/build/${presetName}",
+        "cacheVariables": {
+            "CMAKE_BUILD_TYPE": "Release",
+            "CMAKE_RUNTIME_OUTPUT_DIRECTORY": "${sourceDir}/bin",
+            "CMAKE_PREFIX_PATH": "$env{Qt6_DIR}/lib/cmake",
+            "FFMPEG_DIR": "$env{FFMPEG_DIR}"
+        }
+    },{
+        "name": "MacOS-Debug",
+        "inherits": "MacOS-Release",
+        "hidden": false,
+        "cacheVariables": {
+            "CMAKE_BUILD_TYPE": "Debug"
+        }
     }],
     "buildPresets": [{
         "name": "Win64-Release",
@@ -28,6 +46,14 @@
         "name": "Win64-Debug",
         "hidden": false,
         "configurePreset": "Win64-Debug",
+        "configuration": "Debug"
+    },{
+        "name": "MacOS-Release",
+        "configurePreset": "MacOS-Release",
+        "configuration": "Release"
+    },{
+        "name": "MacOS-Debug",
+        "configurePreset": "MacOS-Debug",
         "configuration": "Debug"
     }]
 }
