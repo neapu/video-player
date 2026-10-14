@@ -87,7 +87,8 @@ public:
      * @param streamIndex 媒体流索引。
      * @param requiredPixelFormats 所需的像素格式列表。
      * @return std::expected<PixelFormat, Error> 实际使用的像素格式或错误信息。
-     * @note 启用流后必须消费，否则可能饿死其他流。
+     * @note 启用流后必须消费，否则可能饿死其他流。需要在调用 start 之前启用，播放过程中切换流时，需要先调用 stop
+     * @note 如果启用硬件加速，会无视 requiredPixelFormats，实际使用的像素格式由硬件决定。
      */
     virtual std::expected<PixelFormat, Error> enableVideoStream(int streamIndex, std::vector<PixelFormat> requiredPixelFormats, bool hardwareAccelerated = false) = 0;
     /**
@@ -95,7 +96,7 @@ public:
      * @param streamIndex 媒体流索引。
      * @param requiredSampleFormats 所需的采样格式列表。
      * @return std::expected<SampleFormat, Error> 实际使用的采样格式或错误信息。
-     * @note 启用流后必须消费，否则可能饿死其他流。
+     * @note 启用流后必须消费，否则可能饿死其他流。需要在调用 start 之前启用，播放过程中切换流时，需要先调用 stop
      */
     virtual std::expected<SampleFormat, Error> enableAudioStream(int streamIndex, std::vector<SampleFormat> requiredSampleFormats) = 0;
 
@@ -120,6 +121,16 @@ public:
      */
     virtual void seek(int64_t positionUs) = 0;
 
+    /**
+     * @brief 开始读取并解码媒体数据。
+     */
+    virtual void start() = 0;
+
+    /**
+     * @brief 停止读取并解码媒体数据。
+     * @note 已经进入队列的帧仍然可以读取，不会停止解码线程，只是不再读取新的媒体数据。
+     */
+    virtual void stop() = 0;
 };
 
 } // namespace media

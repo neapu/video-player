@@ -4,15 +4,16 @@
 
 namespace media {
 using LoggerPtr = std::shared_ptr<spdlog::logger>;
+using LogLevel = spdlog::level::level_enum;
 LoggerPtr createLogger(const std::string& loggerName, const std::string& logDir);
 class FunctionTracer {
 public:
-    FunctionTracer(LoggerPtr logger, spdlog::level::level_enum level, const std::string& functionName);
+    FunctionTracer(LoggerPtr logger, LogLevel level, const std::string& functionName);
     ~FunctionTracer();
 
 private:
     LoggerPtr m_logger;
-    spdlog::level::level_enum m_level;
+    LogLevel m_level;
     std::string m_functionName;
 };
 

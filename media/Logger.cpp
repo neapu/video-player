@@ -81,7 +81,7 @@ LoggerPtr createLogger(const std::string& loggerName, const std::string& logDir)
 
 }
 
-FunctionTracer::FunctionTracer(std::shared_ptr<spdlog::logger> logger, spdlog::level::level_enum level, const std::string& functionName)
+FunctionTracer::FunctionTracer(std::shared_ptr<spdlog::logger> logger, LogLevel level, const std::string& functionName)
     : m_logger(std::move(logger)), m_level(level), m_functionName(functionName) 
 {
     if (m_logger) {

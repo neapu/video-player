@@ -39,14 +39,14 @@ std::vector<StreamInfo> MediaSource::getStreamInfo() const
     return {};
 }
 
-PixelFormat MediaSource::enableVideoStream(int streamIndex, std::vector<PixelFormat> requiredPixelFormats)
+std::expected<PixelFormat, Error> MediaSource::enableVideoStream(int streamIndex, std::vector<PixelFormat> requiredPixelFormats, bool hardwareAccelerated)
 {
-    return PixelFormat::None;
+    return std::unexpected(Error::None);
 }
 
-SampleFormat MediaSource::enableAudioStream(int streamIndex, std::vector<SampleFormat> requiredSampleFormats)
+std::expected<SampleFormat, Error> MediaSource::enableAudioStream(int streamIndex, std::vector<SampleFormat> requiredSampleFormats)
 {
-    return SampleFormat::None;
+    return std::unexpected(Error::None);
 }
 
 MediaFramePtr MediaSource::nextFrame(int streamIndex)
@@ -60,6 +60,14 @@ int64_t MediaSource::duration() const
 }
 
 void MediaSource::seek(int64_t timestamp)
+{
+}
+
+void MediaSource::start()
+{
+}
+
+void MediaSource::stop()
 {
 }
 
