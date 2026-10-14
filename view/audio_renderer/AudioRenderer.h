@@ -10,7 +10,7 @@ public:
     struct Options {
         int sampleRate{44100};
         int channels{2};
-        media::SampleFormat sampleFormat{media::SampleFormat::FLT};
+        media::SampleFormat sampleFormat{media::SampleFormat::Flt};
         float volume{1.0f};
     };
 
@@ -36,7 +36,7 @@ private:
 private:
     int m_sampleRate{0};
     int m_channels{0};
-    media::SampleFormat m_sampleFormat{media::SampleFormat::NONE};
+    media::SampleFormat m_sampleFormat{media::SampleFormat::None};
     float m_volume{1.0f};
     ma_device m_device;
 

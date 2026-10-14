@@ -4,42 +4,42 @@
 
 namespace media {
 enum class PixelFormat {
-    NONE,
-    YUV420P,
-    NV12,
+    None,
+    Yuv420p,
+    Nv12,
 
-    YUV420P10LE,
-    P010LE,
+    Yuv420p10le,
+    P010le,
 };
 
 enum class MemoryType {
-    NONE,
-    CPU,
-    GPU
+    None,
+    Cpu,
+    Gpu
 };
 
 enum class ColorSpace {
-    BT601,
-    BT709,
-    BT2020
+    Bt601,
+    Bt709,
+    Bt2020
 };
 
 enum class ColorRange {
-    LIMITED,
-    FULL
+    Limited,
+    Full
 };
 
 enum class ColorTransferCharacteristic {
-    NONE,
-    PQ,
-    HLG,
+    None,
+    Pq,
+    Hlg,
 };
 
 // 音频采样格式，没有特殊说明都为交错格式
 enum class SampleFormat {
-    NONE,
-    S16LE,
-    FLT
+    None,
+    S16le,
+    Flt
 };
 
 struct FrameFormat {
@@ -57,9 +57,9 @@ struct FrameFormat {
 };
 
 enum class FrameType {
-    EMPTY,  // 帧队列为空时，返回此类型
-    NORMAL, // 正常帧，只有这个类型的帧才包含有效数据
-    END,    // 结束标记，特殊的空帧，渲染器可以根据此类型进行处理
+    Empty,  // 帧队列为空时，返回此类型
+    Normal, // 正常帧，只有这个类型的帧才包含有效数据
+    End,    // 结束标记，特殊的空帧，渲染器可以根据此类型进行处理
 };
 
 class IMediaFrame {
@@ -80,25 +80,25 @@ public:
 
     /**
      * @brief 获取帧数据
-     * @param index 数据索引
+     * @param plane 数据索引
      * @return uint8_t* 帧数据指针
      * @note 对应 FFmpeg 的 AVFrame 中的 data 字段
      */
-    virtual uint8_t* data(int index) = 0;
-    virtual const uint8_t* data(int index) const = 0;
+    virtual uint8_t* data(int plane) = 0;
+    virtual const uint8_t* data(int plane) const = 0;
 
     /**
      * @brief 获取每行字节数
-     * @param index 数据索引
+     * @param plane 数据索引
      * @return int 每行字节数
      * @note 对应 FFmpeg 的 AVFrame 中的 linesize 字段
      */
-    virtual int lineSize(int index) const = 0;
+    virtual int lineSize(int plane) const = 0;
 
     /**
      * @brief 获取底层 AVFrame 原始指针
      * @return void* AVFrame 原始指针
-     * @note 只有 NORMAL 类型的帧才包含有效的 AVFrame 指针。其他类型的帧对象会返回 nullptr。
+     * @note 只有 Normal 类型的帧才包含有效的 AVFrame 指针。其他类型的帧对象会返回 nullptr。
      */
     virtual void* rawFrame() = 0;
     virtual const void* rawFrame() const = 0;
@@ -107,7 +107,7 @@ public:
      * @brief 释放对 AVFrame 指针的所有权
      * @return void* 被释放的 AVFrame 原始指针
      * @note 调用此方法后，IMediaFrame 实例将不再拥有 AVFrame 的所有权，调用者需要负责释放返回的指针。
-     * @note 只有 NORMAL 类型的帧才包含有效的 AVFrame 指针。其他类型的帧对象会返回 nullptr。掏空后，当前帧对象的类型会变为 EMPTY.
+     * @note 只有 Normal 类型的帧才包含有效的 AVFrame 指针。其他类型的帧对象会返回 nullptr。掏空后，当前帧对象的类型会变为 Empty.
      */
     virtual void* release() = 0;
 

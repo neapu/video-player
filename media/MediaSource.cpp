@@ -41,12 +41,12 @@ std::vector<StreamInfo> MediaSource::getStreamInfo() const
 
 PixelFormat MediaSource::enableVideoStream(int streamIndex, std::vector<PixelFormat> requiredPixelFormats)
 {
-    return PixelFormat::NONE;
+    return PixelFormat::None;
 }
 
 SampleFormat MediaSource::enableAudioStream(int streamIndex, std::vector<SampleFormat> requiredSampleFormats)
 {
-    return SampleFormat::NONE;
+    return SampleFormat::None;
 }
 
 MediaFramePtr MediaSource::nextFrame(int streamIndex)

@@ -14,11 +14,6 @@ enum class Error {
      * @note 所有文件相关问题（包括找不到文件，没有有效流等）都会返回此错误。
      */
     FileOpenFailed,
-    /**
-     * @brief 编码器初始化失败。
-     * @note 所有编码器相关问题都会返回此错误。
-     */ 
-    CodecInitFailed,
 
     // ==== 运行阶段 ====
     /**
@@ -91,18 +86,18 @@ public:
      * @brief 启用指定的媒体流，并返回实际使用的像素格式。适用于视频流。
      * @param streamIndex 媒体流索引。
      * @param requiredPixelFormats 所需的像素格式列表。
-     * @return 实际使用的像素格式。
+     * @return std::expected<PixelFormat, Error> 实际使用的像素格式或错误信息。
      * @note 启用流后必须消费，否则可能饿死其他流。
      */
-    virtual PixelFormat enableVideoStream(int streamIndex, std::vector<PixelFormat> requiredPixelFormats) = 0;
+    virtual std::expected<PixelFormat, Error> enableVideoStream(int streamIndex, std::vector<PixelFormat> requiredPixelFormats, bool hardwareAccelerated = false) = 0;
     /**
      * @brief 启用指定的媒体流，并返回实际使用的采样格式。适用于音频流。
      * @param streamIndex 媒体流索引。
      * @param requiredSampleFormats 所需的采样格式列表。
-     * @return 实际使用的采样格式。
+     * @return std::expected<SampleFormat, Error> 实际使用的采样格式或错误信息。
      * @note 启用流后必须消费，否则可能饿死其他流。
      */
-    virtual SampleFormat enableAudioStream(int streamIndex, std::vector<SampleFormat> requiredSampleFormats) = 0;
+    virtual std::expected<SampleFormat, Error> enableAudioStream(int streamIndex, std::vector<SampleFormat> requiredSampleFormats) = 0;
 
     /**
      * @brief 获取指定媒体流的下一帧。
