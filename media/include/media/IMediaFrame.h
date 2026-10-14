@@ -29,6 +29,12 @@ enum class ColorRange {
     FULL
 };
 
+enum class ColorTransferCharacteristic {
+    NONE,
+    PQ,
+    HLG,
+};
+
 // 音频采样格式，没有特殊说明都为交错格式
 enum class SampleFormat {
     NONE,
@@ -42,6 +48,7 @@ struct FrameFormat {
     PixelFormat pixelFormat;
     ColorSpace colorSpace;
     ColorRange colorRange;
+    ColorTransferCharacteristic colorTrc;
 
     int sampleRate;
     int channels;

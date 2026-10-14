@@ -25,6 +25,12 @@ enum class Error {
      * @note 恢复方法：触发一次成功的 seek 操作。
      */
     ReadFailed,
+    /**
+     * @brief Seek 操作失败。
+     * @note 无需恢复，流会继续保持当前状态。
+     */ 
+    SeekFailed,
+
     // 根据后续实现添加错误类型
 
     /**
@@ -59,10 +65,9 @@ public:
         std::string instanceName{"default"}; // 多实例时区分日志
         /**
          * @brief 回调函数，在 seek 操作完成后被调用。
-         * @param success 是否成功完成 seek 操作。
          * @note 该回调发生在 media 内部线程，不允许在回调中析构 MediaSource 实例。
          */
-        std::function<void(bool)> onSeekComplete{};
+        std::function<void()> onSeekSuccess{};
         /**
          * @brief 回调函数，在发生错误时被调用。
          * @param error 发生的错误类型。
@@ -106,8 +111,17 @@ public:
      */
     virtual MediaFramePtr nextFrame(int streamIndex) = 0;
 
+    /**
+     * @brief 获取媒体的总时长。
+     * @return int64_t 媒体的总时长，单位为微秒。
+     */
     virtual int64_t duration() const = 0;
 
+    /**
+     * @brief 跳转到指定的播放位置。
+     * @param positionUs 目标播放位置，单位为微秒。
+     * @note 成功将触发 onSeekSuccess 回调。失败将触发 onError 回调。
+     */
     virtual void seek(int64_t positionUs) = 0;
 
 };
