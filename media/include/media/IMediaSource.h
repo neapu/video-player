@@ -7,6 +7,7 @@
 
 namespace media {
 enum class Error {
+    None,
     // ==== 创建阶段 ====
     /**
      * @brief 打开文件失败。
