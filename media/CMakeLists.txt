@@ -15,6 +15,8 @@ set(SRC_FILES
     MediaPacket.cpp
     MediaFrame.h
     MediaFrame.cpp
+    Demuxer.h
+    Demuxer.cpp
 )
 
 add_library(${LIB_NAME} STATIC ${SRC_FILES})

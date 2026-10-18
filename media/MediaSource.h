@@ -1,4 +1,7 @@
+#pragma once
+#include <thread>
 #include "media/IMediaSource.h"
+#include "Demuxer.h"
 
 namespace media {
 class MediaSource : public IMediaSource {
@@ -19,11 +22,18 @@ private:
     MediaSource(const Options& options);
     Error initialize();
 
+    void demuxWorkerFunc();
 private:
     std::string m_source;
     std::string m_logDir;
     std::string m_instanceName;
     std::function<void()> m_onSeekSuccess;
     std::function<void(Error)> m_onError;
+
+    LoggerPtr m_logger;
+    std::unique_ptr<Demuxer> m_demuxer;
+    
+    std::atomic_bool m_demuxeRunning{false};
+    std::thread m_demuxThread;
 };
 } // namespace media

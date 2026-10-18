@@ -197,4 +197,13 @@ int64_t MediaFrame::pts() const
     return av_rescale_q(m_frame->pts, m_frame->time_base, AVRational{1, 1000000}); // Convert to microseconds
 }
 
+fh::FramePtr MediaFrame::releaseFrame()
+{
+    if (!m_frame) {
+        return nullptr;
+    }
+    m_type = FrameType::Empty;
+    return std::move(m_frame);
+}
+
 } // namespace media

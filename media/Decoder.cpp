@@ -2,14 +2,14 @@
 #include "ffmpeg_helper/FFmpegError.h"
 
 namespace media {
-std::expected<Decoder, int> Decoder::create(const Options& options)
+std::unique_ptr<Decoder> Decoder::create(const Options& options)
 {
-    Decoder decoder(options);
-    int err = decoder.initialize(options.stream);
-    if (err != 0) {
-        return std::unexpected(err);
+    std::unique_ptr<Decoder> decoder(new Decoder(options));
+    bool ret = decoder->initialize(options.stream);
+    if (!ret) {
+        return nullptr;
     }
-    return std::move(decoder);
+    return decoder;
 }
 
 Decoder::Decoder(const Options& options)
@@ -18,46 +18,46 @@ Decoder::Decoder(const Options& options)
 {
 }
 
-int Decoder::initialize(const AVStream* stream)
+bool Decoder::initialize(const AVStream* stream)
 {
     FUNC_TRACE(m_logger, LogLevel::info);
-    int ret = createContext(stream);
-    if (ret != 0) {
-        return ret;
+    bool ret = createContext(stream);
+    if (!ret) {
+        return false;
     }
     return openCodec();
 }
 
-int Decoder::createContext(const AVStream* stream)
+bool Decoder::createContext(const AVStream* stream)
 {
     FUNC_TRACE(m_logger, LogLevel::info);
     if (!stream) {
         LOG_ERROR(m_logger, "Stream is null");
-        return AVERROR(EINVAL);
+        return false;
     }
     const AVCodec* codec = avcodec_find_decoder(stream->codecpar->codec_id);
     if (!codec) {
-        LOG_ERROR(m_logger, "Decoder not found for codec id {}", stream->codecpar->codec_id);
-        return AVERROR_DECODER_NOT_FOUND;
+        LOG_ERROR(m_logger, "Decoder not found for codec id {}", static_cast<int>(stream->codecpar->codec_id));
+        return false;
     }
     m_codecContext = fh::makeCodecContext(codec);
     if (!m_codecContext) {
         LOG_ERROR(m_logger, "Failed to allocate codec context");
-        return AVERROR(ENOMEM);
+        return false;
     }
     int ret = avcodec_parameters_to_context(m_codecContext.get(), stream->codecpar);
     if (ret != 0) {
         LOG_ERROR(m_logger, "Failed to copy codec parameters to context: {}", fh::err2str(ret));
-        return ret;
+        return false;
     }
     m_codecContext->codec = codec;
     m_codecContext->time_base = stream->time_base;
     m_codecContext->pkt_timebase = stream->time_base;
     m_codecContext->thread_count = 0; // Let FFmpeg decide the optimal number of threads
-    return 0;
+    return true;
 }
 
-int Decoder::openCodec()
+bool Decoder::openCodec()
 {
     FUNC_TRACE(m_logger, LogLevel::info);
     if (!m_codecContext) {
@@ -67,9 +67,9 @@ int Decoder::openCodec()
     int ret = avcodec_open2(m_codecContext.get(), m_codecContext->codec, nullptr);
     if (ret != 0) {
         LOG_ERROR(m_logger, "Failed to open codec: {}", fh::err2str(ret));
-        return ret;
+        return false;
     }
-    return 0;
+    return true;
 }
 
 int Decoder::sendPacket(fh::PacketPtr&& packet)
@@ -101,6 +101,15 @@ std::expected<fh::FramePtr, int> Decoder::receiveFrame()
         return std::unexpected(ret);
     }
     return frame;
+}
+
+void Decoder::flush()
+{
+    if (!m_codecContext) {
+        LOG_ERROR(m_logger, "Codec context is not initialized");
+        return;
+    }
+    avcodec_flush_buffers(m_codecContext.get());
 }
 
 } // namespace media

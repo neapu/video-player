@@ -18,9 +18,13 @@ MediaPacket::MediaPacket(int64_t epoch, PacketType type, fh::PacketPtr&& packet)
 {
 }
 
-AVPacket* MediaPacket::avPacket()
+fh::PacketPtr MediaPacket::releasePacket()
 {
-    return m_packet.get();
+    if (!m_packet) {
+        return nullptr;
+    }
+    m_type = PacketType::Empty;
+    return std::move(m_packet);
 }
 
 } // namespace media

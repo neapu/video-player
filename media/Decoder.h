@@ -1,4 +1,5 @@
 #pragma once
+#include <optional>
 #include <expected>
 #include "ffmpeg_helper/CodecContext.h"
 #include "ffmpeg_helper/Packet.h"
@@ -22,8 +23,7 @@ public:
         LoggerPtr logger{nullptr};
     };
 
-    // 错误为 FFmpeg 错误码
-    static std::expected<Decoder, int> create(const Options& options);
+    static std::unique_ptr<Decoder> create(const Options& options);
 
     virtual ~Decoder() = default;
     Decoder(const Decoder&) = delete;
@@ -34,12 +34,14 @@ public:
     int sendPacket(fh::PacketPtr&& packet);
     std::expected<fh::FramePtr, int> receiveFrame();
 
+    void flush();
+
 protected:
     explicit Decoder(const Options& options);
-    int initialize(const AVStream* stream);
+    bool initialize(const AVStream* stream);
 
-    int createContext(const AVStream* stream);
-    int openCodec();
+    bool createContext(const AVStream* stream);
+    bool openCodec();
 
 protected:
     Type m_type;

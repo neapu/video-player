@@ -10,7 +10,7 @@ public:
     static AVPixelFormat toAvPixelFormat(PixelFormat format);
     static AVSampleFormat toAvSampleFormat(SampleFormat format);
 
-    MediaFrame(FrameType type, fh::FramePtr&& frame);
+    explicit MediaFrame(FrameType type, fh::FramePtr&& frame = nullptr);
     MediaFrame(const MediaFrame&) = delete;
     MediaFrame& operator=(const MediaFrame&) = delete;
     MediaFrame(MediaFrame&&) = default;
@@ -27,8 +27,7 @@ public:
     void* release() override;
     int64_t pts() const override;
 
-    AVFrame* avFrame() { return m_frame.get(); }
-    const AVFrame* avFrame() const { return m_frame.get(); }
+    fh::FramePtr releaseFrame();
 
 protected:
     FrameType m_type{FrameType::Empty};

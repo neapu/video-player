@@ -31,6 +31,24 @@ MediaSource::~MediaSource()
 
 Error MediaSource::initialize()
 {
+    if (m_instanceName.empty()) {
+        m_instanceName = "default";
+    }
+    if (!m_logDir.empty()) {
+        m_logger = createLogger(m_instanceName, m_logDir);
+    }
+
+    m_demuxer = Demuxer::create({
+        m_source,
+        m_logger
+    });
+    if (!m_demuxer) {
+        LOG_ERROR(m_logger, "Failed to create demuxer");
+        return Error::FileOpenFailed;
+    }
+
+    LOG_INFO(m_logger, "MediaSource initialized successfully");
+
     return Error::None;
 }
 

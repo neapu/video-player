@@ -131,6 +131,12 @@ public:
      * @note 已经进入队列的帧仍然可以读取，不会停止解码线程，只是不再读取新的媒体数据。
      */
     virtual void stop() = 0;
+
+    /**
+     * @brief 检查媒体源是否正在运行。
+     * @return true 如果媒体源正在运行，false 否则。
+     */
+    virtual bool running() const = 0;
 };
 
 } // namespace media

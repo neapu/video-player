@@ -13,7 +13,7 @@ class MediaPacket {
 public:
     static std::optional<MediaPacket> createPacket(int64_t epoch, PacketType type);
 
-    MediaPacket(int64_t epoch, PacketType type, fh::PacketPtr&& packet);
+    MediaPacket(int64_t epoch = -1, PacketType type = PacketType::Empty, fh::PacketPtr&& packet = nullptr);
     MediaPacket(const MediaPacket&) = delete;
     MediaPacket& operator=(const MediaPacket&) = delete;
     MediaPacket(MediaPacket&&) = default;
@@ -22,7 +22,8 @@ public:
 
     PacketType type() const { return m_type; }
     int64_t epoch() const { return m_epoch; }
-    AVPacket* avPacket();
+    
+    fh::PacketPtr releasePacket();
 
 private:
     PacketType m_type{PacketType::Empty};
