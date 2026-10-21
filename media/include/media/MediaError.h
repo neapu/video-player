@@ -27,10 +27,6 @@ enum class StreamError {
      */
     InvalidIndex,
     /**
-     * @brief 流类型不匹配
-     */
-    StreamTypeMismatch,
-    /**
      * @brief 解封装线程未停止，无法操作流。
      */
     DemuxerRunning,
@@ -42,6 +38,10 @@ enum class StreamError {
      * @brief 指定的流未启用，无法操作。
      */
     StreamNotEnabled,
+    /**
+     * @brief 创建解码器失败。
+     */ 
+    DecoderCreationFailed
 };
 enum class SeekError {
     None,

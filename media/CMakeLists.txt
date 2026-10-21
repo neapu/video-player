@@ -19,6 +19,10 @@ set(SRC_FILES
     Demuxer.cpp
 )
 
+if (WIN32)
+    list(APPEND SRC_FILES D3d11vaDecoder.h D3d11vaDecoder.cpp)
+endif()
+
 add_library(${LIB_NAME} STATIC ${SRC_FILES})
 
 target_include_directories(${LIB_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)

@@ -12,8 +12,11 @@ public:
     static std::expected<std::unique_ptr<IMediaSource>, CreateError> create(const Options& options);
 
     std::vector<StreamInfo> getStreamInfo() const override;
-    std::expected<PixelFormat, StreamError> enableVideoStream(int streamIndex, std::vector<PixelFormat> requiredPixelFormats, bool hardwareAccelerated = false) override;
-    std::expected<SampleFormat, StreamError> enableAudioStream(int streamIndex, std::vector<SampleFormat> requiredSampleFormats) override;
+    StreamError enableStream(
+        int streamIndex, 
+        bool hardwareAccelerated = false,
+        void* hardwareContext = nullptr
+    ) override;
     StreamError disableStream(int streamIndex) override;
     MediaFramePtr nextFrame(int streamIndex) override;
     int64_t duration() const override;

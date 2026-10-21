@@ -1,15 +1,25 @@
 #include "Decoder.h"
 #include "ffmpeg_helper/FFmpegError.h"
+#include "D3d11vaDecoder.h"
 
 namespace media {
 std::unique_ptr<Decoder> Decoder::create(const Options& options)
 {
-    std::unique_ptr<Decoder> decoder(new Decoder(options));
-    bool ret = decoder->initialize(options.stream);
-    if (!ret) {
-        return nullptr;
+    switch (options.type) {
+        case Decoder::Type::D3d11va:
+            return D3d11vaDecoder::create(options);
+        case Decoder::Type::Software:
+            {
+                std::unique_ptr<Decoder> decoder(new Decoder(options));
+                if (!decoder->initialize(options.stream)) {
+                    return nullptr;
+                }
+                return decoder;
+            }
+        default:
+            LOG_ERROR(options.logger, "Unsupported decoder type");
+            return nullptr;
     }
-    return decoder;
 }
 
 Decoder::Decoder(const Options& options)
@@ -22,6 +32,10 @@ bool Decoder::initialize(const AVStream* stream)
 {
     FUNC_TRACE(m_logger, LogLevel::info);
     bool ret = createContext(stream);
+    if (!ret) {
+        return false;
+    }
+    ret = createHardwareContext(stream);
     if (!ret) {
         return false;
     }

@@ -1,4 +1,5 @@
 #include "MediaSource.h"
+#include "ffmpeg_helper/FFmpegError.h"
 
 namespace media {
 std::expected<std::unique_ptr<IMediaSource>, CreateError> IMediaSource::create(const Options& options)
@@ -76,27 +77,122 @@ std::vector<StreamInfo> MediaSource::getStreamInfo() const
     return {};
 }
 
-std::expected<PixelFormat, StreamError> MediaSource::enableVideoStream(int streamIndex, std::vector<PixelFormat> requiredPixelFormats, bool hardwareAccelerated)
+StreamError MediaSource::enableStream(int streamIndex, bool hardwareAccelerated, void* hardwareContext)
 {
     if (m_demuxRunning) {
         LOG_ERROR(m_logger, "Cannot enable video stream while demuxer is running");
-        return std::unexpected(StreamError::DemuxerRunning);
+        return StreamError::DemuxerRunning;
     }
 
     if (m_decodeWorkers.contains(streamIndex)) {
         LOG_ERROR(m_logger, "Video stream already enabled");
-        return std::unexpected(StreamError::StreamAlreadyEnabled);
+        return StreamError::StreamAlreadyEnabled;
     }
+
+    if (streamIndex < 0 || streamIndex >= m_demuxer->streamCount()) {
+        LOG_ERROR(m_logger, "Invalid stream index");
+        return StreamError::InvalidIndex;
+    }
+
+    AVStream* stream = m_demuxer->stream(streamIndex);
+    if (!stream) {
+        LOG_ERROR(m_logger, "Invalid stream index");
+        return StreamError::InvalidIndex;
+    }
+
+    Decoder::Options decoderOptions{};
+    if (hardwareAccelerated) {
+#ifdef _WIN32
+        decoderOptions.type = Decoder::Type::D3d11va;
+        decoderOptions.hardwareContext = hardwareContext;
+#else
+        decoderOptions.type = Decoder::Type::Software;
+#endif
+    } else {
+        decoderOptions.type = Decoder::Type::Software;
+    }
+    decoderOptions.stream = stream;
+    decoderOptions.logger = m_logger;
+    auto decoder = Decoder::create(decoderOptions);
+    if (!decoder) {
+        LOG_ERROR(m_logger, "Failed to create decoder for video stream");
+        return StreamError::DecoderCreationFailed;
+    }
+
+    // 测试解码器工作是否正常（解码出一帧有效帧）
+    bool testSuccess{false};
+    for (int i = 0; i < 30; ++i) {
+        auto packetExp = m_demuxer->readPacket();
+        if (!packetExp) {
+            int err = packetExp.error();
+            LOG_ERROR(m_logger, "Failed to read packet from demuxer. Error: {}", fh::err2str(err));
+            break;
+        }
+        auto packet = std::move(*packetExp);
+        if (packet->stream_index != streamIndex) {
+            continue;
+        }
+        int ret = decoder->sendPacket(std::move(packet));
+        if (ret < 0) {
+            LOG_ERROR(m_logger, "Failed to send packet to decoder. Error: {}", fh::err2str(ret));
+            break;
+        }
+        bool receiveError{false};
+        while (true) {
+            auto frameExp = decoder->receiveFrame();
+            if (!frameExp) {
+                int err = frameExp.error();
+                if (err == AVERROR(EAGAIN) || err == AVERROR_EOF) {
+                    break;
+                }
+                LOG_ERROR(m_logger, "Failed to receive frame from decoder. Error: {}", fh::err2str(err));
+                receiveError = true;
+                break;
+            }
+            testSuccess = true;
+            break;
+        }
+        if (receiveError) {
+            break;
+        }
+    }
+    m_demuxer->seek(0); // Reset demuxer to the beginning after test decoding
+    if (!testSuccess) {
+        LOG_ERROR(m_logger, "Decoder test failed");
+        return StreamError::DecoderCreationFailed;
+    }
+    return StreamError::None;
 }
 
-std::expected<SampleFormat, StreamError> MediaSource::enableAudioStream(int streamIndex, std::vector<SampleFormat> requiredSampleFormats)
+StreamError MediaSource::disableStream(int streamIndex)
 {
-    return std::unexpected(StreamError::None);
+    if (m_demuxRunning) {
+        LOG_ERROR(m_logger, "Cannot enable video stream while demuxer is running");
+        return StreamError::DemuxerRunning;
+    }
+
+    auto it = m_decodeWorkers.find(streamIndex);
+    if (it == m_decodeWorkers.end()) {
+        LOG_ERROR(m_logger, "Stream not found");
+        return StreamError::InvalidIndex;
+    }
+
+    m_decodeWorkers.erase(it);
+
+    return StreamError::None;
 }
 
 MediaFramePtr MediaSource::nextFrame(int streamIndex)
 {
-    return nullptr;
+    auto it = m_decodeWorkers.find(streamIndex);
+    if (it == m_decodeWorkers.end()) {
+        LOG_ERROR(m_logger, "Stream not found");
+        return nullptr;
+    }
+
+    auto& worker = it->second;
+    auto frame = worker->popFrame();
+    return std::make_unique<MediaFrame>(std::move(frame));
 }
 
 int64_t MediaSource::duration() const
