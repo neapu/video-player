@@ -54,4 +54,5 @@ private:
     bool m_interrupted;
     std::atomic_bool m_exitFlag{false};
 };
+using DecodeWorkerPtr = std::unique_ptr<DecodeWorker>;
 } // namespace media
