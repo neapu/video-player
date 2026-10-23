@@ -13,6 +13,7 @@ std::unique_ptr<DecodeWorker> DecodeWorker::create(const Options& opts, std::uni
 DecodeWorker::DecodeWorker(const Options& opts, std::unique_ptr<Decoder>&& decoder)
     : m_maxPacketQueueSize(opts.maxPacketQueueSize)
     , m_maxFrameQueueSize(opts.maxFrameQueueSize)
+    , m_processor(opts.processor)
     , m_logger(opts.logger)
     , m_decoder(std::move(decoder))
 {
@@ -209,6 +210,13 @@ void DecodeWorker::drainDecoder()
 
 bool DecodeWorker::enqueueFrame(fh::FramePtr&& frame)
 {
+    if (m_processor) {
+        frame = m_processor->process(std::move(frame));
+        if (!frame) {
+            return false;
+        }
+    }
+
     std::unique_lock<std::mutex> lock(m_frameQueueMutex);
     if (m_frameQueue.size() >= m_maxFrameQueueSize) {
         m_frameQueueNotFullCondVar.wait(lock, [this]() {

@@ -52,7 +52,15 @@ enum class StreamError {
     /**
      * @brief 创建解码器失败。
      */ 
-    DecoderCreationFailed
+    DecoderCreationFailed,
+    /**
+     * @brief 指定的流类型不匹配
+     */ 
+    StreamTypeMismatch,
+    /**
+     * @brief 请求的像素/采样格式为空
+     */
+    RequestFormatEmpty
 };
 enum class SeekError {
     None,
@@ -76,5 +84,8 @@ enum class StartError {
      * @brief 没有启用任何流。
      */
     NoStreamEnabled
+};
+enum class ProcessError {
+    None,
 };
 } // namespace media

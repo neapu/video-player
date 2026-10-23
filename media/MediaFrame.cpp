@@ -133,6 +133,16 @@ AVSampleFormat MediaFrame::toAvSampleFormat(SampleFormat format)
     return ::toAvSampleFormat(format);
 }
 
+PixelFormat MediaFrame::toPixelFormat(AVPixelFormat format)
+{
+    return ::toPixelFormat(format);
+}
+
+SampleFormat MediaFrame::toSampleFormat(AVSampleFormat format)
+{
+    return ::toSampleFormat(format);
+}
+
 MediaFrame::MediaFrame(FrameType type, fh::FramePtr&& frame)
     : m_type(type)
     , m_frame(std::move(frame))
@@ -149,22 +159,22 @@ FrameFormat MediaFrame::format() const
     if (m_frame->hw_frames_ctx) {
         fmt.memoryType = MemoryType::Gpu;
         auto* hwFrameCtx = reinterpret_cast<AVHWFramesContext*>(m_frame->hw_frames_ctx->data);
-        fmt.pixelFormat = toPixelFormat(hwFrameCtx->sw_format);
+        fmt.pixelFormat = ::toPixelFormat(hwFrameCtx->sw_format);
     } else {
         fmt.memoryType = MemoryType::Cpu;
-        fmt.pixelFormat = toPixelFormat(m_frame->format);
+        fmt.pixelFormat = ::toPixelFormat(m_frame->format);
     }
 
     fmt.width = m_frame->width;
     fmt.height = m_frame->height;
-    fmt.colorSpace = toColorSpace(m_frame->colorspace);
-    fmt.colorRange = toColorRange(m_frame->color_range);
-    fmt.colorTrc = toColorTrc(m_frame->color_trc);
+    fmt.colorSpace = ::toColorSpace(m_frame->colorspace);
+    fmt.colorRange = ::toColorRange(m_frame->color_range);
+    fmt.colorTrc = ::toColorTrc(m_frame->color_trc);
     
     fmt.sampleRate = m_frame->sample_rate;
     fmt.channels = m_frame->ch_layout.nb_channels;
     fmt.samples = m_frame->nb_samples;
-    fmt.sampleFormat = toSampleFormat(m_frame->format);
+    fmt.sampleFormat = ::toSampleFormat(m_frame->format);
 
     return fmt;
 }

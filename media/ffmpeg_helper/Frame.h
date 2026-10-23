@@ -11,5 +11,6 @@ struct FrameDeleter {
 };
 using FramePtr = std::unique_ptr<AVFrame, FrameDeleter>;
 FramePtr makeFrame();
+FramePtr copyFrame(const FramePtr& frame);
 
 } // namespace fh

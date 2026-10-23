@@ -17,6 +17,12 @@ set(SRC_FILES
     MediaFrame.cpp
     Demuxer.h
     Demuxer.cpp
+    FrameProcessor.h
+    FrameProcessor.cpp
+    SwsConvertor.h
+    SwsConvertor.cpp
+    SwrConvertor.h
+    SwrConvertor.cpp
 )
 
 if (WIN32)

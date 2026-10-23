@@ -8,6 +8,7 @@
 #include "MediaFrame.h"
 #include "Logger.h"
 #include "Decoder.h"
+#include "FrameProcessor.h"
 
 namespace media {
 class DecodeWorker {
@@ -15,6 +16,7 @@ public:
     struct Options {
         int maxPacketQueueSize = 100;
         int maxFrameQueueSize = 5;
+        FrameProcessorPtr processor{nullptr};
         LoggerPtr logger;
     };
 
@@ -42,6 +44,7 @@ private:
 private:
     int m_maxPacketQueueSize;
     int m_maxFrameQueueSize;
+    FrameProcessorPtr m_processor;
     LoggerPtr m_logger;
     std::unique_ptr<Decoder> m_decoder;
     std::thread m_thread;

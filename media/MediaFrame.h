@@ -9,6 +9,8 @@ public:
     static std::optional<MediaFrame> createFrame(FrameType type);
     static AVPixelFormat toAvPixelFormat(PixelFormat format);
     static AVSampleFormat toAvSampleFormat(SampleFormat format);
+    static PixelFormat toPixelFormat(AVPixelFormat format);
+    static SampleFormat toSampleFormat(AVSampleFormat format);
 
     explicit MediaFrame(FrameType type, fh::FramePtr&& frame = nullptr);
     MediaFrame(const MediaFrame&) = delete;

@@ -15,4 +15,10 @@ FramePtr makeFrame()
     return FramePtr(frame);
 }
 
+FramePtr copyFrame(const FramePtr& frame)
+{
+    AVFrame* f = av_frame_clone(frame.get());
+    return FramePtr(f);
+}
+
 } // namespace fh

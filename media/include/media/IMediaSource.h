@@ -54,17 +54,30 @@ public:
     virtual std::vector<StreamInfo> streamsInfo() const = 0;
 
     /**
-     * @brief 启用指定的媒体流。
+     * @brief 启用指定的媒体流。适用于视频流。
      * @param streamIndex 媒体流索引。
+     * @param requirePixelFormats 期望的像素格式。
      * @param hardwareAccelerated 是否启用硬件加速，只对视频流有效。
      * @param hardwareContext 硬件上下文指针，仅在启用硬件加速时使用。裸指针安全声明：只借用，需要确保在 MediaSource 对象存在期间该指针有效。
-     * @return StreamError 操作结果。
+     * @return 成功返回实际使用的像素格式，失败返回错误。
      * @note 启用流后必须消费，否则可能饿死其他流。只能在停止状态下操作流。
+     * @note 如果启用硬件加速解码，会无视 requirePixelFormats。
      */
-    virtual StreamError enableStream(
+    virtual std::expected<PixelFormat, StreamError> enableVideoStream(
         int streamIndex,
+        std::vector<PixelFormat> requirePixelFormats,
         bool hardwareAccelerated = false,
         void* hardwareContext = nullptr
+    ) = 0;
+    /**
+     * @brief 启用指定的媒体流。适用于音频流。
+     * @param streamIndex 媒体流索引。
+     * @param requireSampleFormats 期望的采样格式。
+     * @return 成功返回实际使用的采样格式，失败返回错误。
+     */
+    virtual std::expected<SampleFormat, StreamError> enableAudioStream(
+        int streamIndex,
+        std::vector<SampleFormat> requireSampleFormats
     ) = 0;
     /**
      * @brief 禁用指定的媒体流。

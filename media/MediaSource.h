@@ -4,6 +4,7 @@
 #include "Demuxer.h"
 #include <unordered_map>
 #include "DecodeWorker.h"
+#include "SwsConvertor.h"
 
 namespace media {
 class MediaSource : public IMediaSource {
@@ -12,10 +13,15 @@ public:
     static std::expected<std::unique_ptr<IMediaSource>, CreateError> create(const Options& options);
 
     std::vector<StreamInfo> streamsInfo() const override;
-    StreamError enableStream(
+    std::expected<PixelFormat, StreamError> enableVideoStream(
         int streamIndex, 
+        std::vector<PixelFormat> requirePixelFormats,
         bool hardwareAccelerated = false,
         void* hardwareContext = nullptr
+    ) override;
+    std::expected<SampleFormat, StreamError> enableAudioStream(
+        int streamIndex,
+        std::vector<SampleFormat> requireSampleFormats
     ) override;
     StreamError disableStream(int streamIndex) override;
     MediaFramePtr nextFrame(int streamIndex) override;
@@ -33,6 +39,8 @@ private:
     CreateError initialize();
 
     void demuxWorkerFunc();
+
+    std::optional<std::shared_ptr<SwsConvertor>> createSwsConvertor(const fh::FramePtr& frame, AVPixelFormat target);
 private:
     std::string m_source;
     std::string m_logDir;

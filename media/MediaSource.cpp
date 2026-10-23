@@ -1,6 +1,8 @@
 #include "MediaSource.h"
 #include "ffmpeg_helper/FFmpegError.h"
 #include <exception>
+#include "SwsConvertor.h"
+#include "SwrConvertor.h"
 
 namespace media {
 std::expected<std::unique_ptr<IMediaSource>, CreateError> IMediaSource::create(const Options& options)
@@ -119,31 +121,39 @@ std::vector<StreamInfo> MediaSource::streamsInfo() const
     return infos;
 }
 
-StreamError MediaSource::enableStream(int streamIndex, bool hardwareAccelerated, void* hardwareContext)
+std::expected<PixelFormat, StreamError> MediaSource::enableVideoStream(int streamIndex, std::vector<PixelFormat> requirePixelFormats, bool hardwareAccelerated, void* hardwareContext)
 {
     if (m_demuxRunning) {
         LOG_ERROR(m_logger, "Cannot enable video stream while demuxer is running");
-        return StreamError::DemuxerRunning;
+        return std::unexpected(StreamError::DemuxerRunning);
     }
 
     if (m_decodeWorkers.contains(streamIndex)) {
         LOG_ERROR(m_logger, "Video stream already enabled");
-        return StreamError::StreamAlreadyEnabled;
+        return std::unexpected(StreamError::StreamAlreadyEnabled);
     }
 
     if (streamIndex < 0 || streamIndex >= m_demuxer->streamCount()) {
         LOG_ERROR(m_logger, "Invalid stream index");
-        return StreamError::InvalidIndex;
+        return std::unexpected(StreamError::InvalidIndex);
     }
 
     AVStream* stream = m_demuxer->stream(streamIndex);
     if (!stream) {
         LOG_ERROR(m_logger, "Invalid stream index");
-        return StreamError::InvalidIndex;
+        return std::unexpected(StreamError::InvalidIndex);
+    }
+
+    if (stream->codecpar->codec_type != AVMEDIA_TYPE_VIDEO) {
+        return std::unexpected(StreamError::StreamTypeMismatch);
+    }
+
+    if (requirePixelFormats.empty()) {
+        return std::unexpected(StreamError::RequestFormatEmpty);
     }
 
     Decoder::Options decoderOptions{};
-    if (hardwareAccelerated && stream->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
+    if (hardwareAccelerated) {
 #ifdef _WIN32
         decoderOptions.type = Decoder::Type::D3d11va;
         decoderOptions.hardwareContext = hardwareContext;
@@ -158,9 +168,11 @@ StreamError MediaSource::enableStream(int streamIndex, bool hardwareAccelerated,
     auto decoder = Decoder::create(decoderOptions);
     if (!decoder) {
         LOG_ERROR(m_logger, "Failed to create decoder for video stream");
-        return StreamError::DecoderCreationFailed;
+        return std::unexpected(StreamError::DecoderCreationFailed);
     }
 
+    PixelFormat retFmt{PixelFormat::None};
+    std::shared_ptr<SwsConvertor> sws{nullptr};
     // 测试解码器工作是否正常（解码出一帧有效帧）
     bool testSuccess{false};
     for (int i = 0; i < 30; ++i) {
@@ -191,6 +203,20 @@ StreamError MediaSource::enableStream(int streamIndex, bool hardwareAccelerated,
                 receiveError = true;
                 break;
             }
+            auto frame = std::move(*frameExp);
+            // 非硬解码的情况，需要测试转换器，如果目标格式中不包含当前帧格式，需要创建转换器并测试
+            auto frameFmt = MediaFrame::toPixelFormat(static_cast<AVPixelFormat>(frame->format));
+            if (decoder->type() == Decoder::Type::Software && std::find(requirePixelFormats.begin(), requirePixelFormats.end(), frameFmt) == requirePixelFormats.end()) {
+                auto swsOpt = createSwsConvertor(frame, MediaFrame::toAvPixelFormat(requirePixelFormats[0]));
+                if (!swsOpt) break;
+                sws = *swsOpt;
+                if (sws) {
+                    retFmt = MediaFrame::toPixelFormat(sws->targetFormat());
+                }
+            } else {
+                retFmt = frameFmt;
+            }
+
             testSuccess = true;
             break;
         }
@@ -201,41 +227,37 @@ StreamError MediaSource::enableStream(int streamIndex, bool hardwareAccelerated,
     m_demuxer->seek(0); // Reset demuxer to the beginning after test decoding
     if (!testSuccess) {
         LOG_ERROR(m_logger, "Decoder test failed");
-        return StreamError::DecoderCreationFailed;
+        return std::unexpected(StreamError::DecoderCreationFailed);
     }
     decoder->flush();
 
     // 根据解码器类型，估算包队列长度
     // 目标是视频缓存10秒，音频缓存3秒
     // 由于包不携带时长信息（一包不一定对应一帧），视频根据帧率估算，音频根据采样率估算
-    int packetQueueLength = 0;
-    if (stream->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
-        const auto frameRate = stream->codecpar->framerate;
-        int fps = frameRate.den > 0 ? frameRate.num / frameRate.den : 0;
-        fps = fps > 0 ? fps : 120;  // 留足余量，不差这点内存
-        packetQueueLength = fps * 10; // 10秒的视频缓存
-        LOG_INFO(m_logger, "Estimated video packet queue length: {}", packetQueueLength);
-    } else if (stream->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
-        int sampleRate = stream->codecpar->sample_rate > 0 ? stream->codecpar->sample_rate : 48000;
-        int samplesPerFrame = stream->codecpar->frame_size > 0 ? stream->codecpar->frame_size : 1024;
-        packetQueueLength = sampleRate * 3 / samplesPerFrame; // 3秒的音频缓存
-        LOG_INFO(m_logger, "Estimated audio packet queue length: {}", packetQueueLength);
-    } else {
-        packetQueueLength = 10; // 字幕流等
-        LOG_INFO(m_logger, "Estimated packet queue length for non-video/audio stream: {}", packetQueueLength);
-    }
+    const auto frameRate = stream->codecpar->framerate;
+    int fps = frameRate.den > 0 ? frameRate.num / frameRate.den : 0;
+    fps = fps > 0 ? fps : 120;  // 留足余量，不差这点内存
+    int packetQueueLength = fps * 10; // 10秒的视频缓存
+    LOG_INFO(m_logger, "Estimated video packet queue length: {}", packetQueueLength);
+
     DecodeWorker::Options decodeWorkerOpts;
     decodeWorkerOpts.maxPacketQueueSize = packetQueueLength;
     decodeWorkerOpts.maxFrameQueueSize = 5;
+    decodeWorkerOpts.processor = sws;
     decodeWorkerOpts.logger = m_logger;
     auto decodeWorker = DecodeWorker::create(decodeWorkerOpts, std::move(decoder));
     if (!decodeWorker) {
         LOG_ERROR(m_logger, "Failed to create decode worker");
-        return StreamError::DecoderCreationFailed;
+        return std::unexpected(StreamError::DecoderCreationFailed);
     }
     m_decodeWorkers[streamIndex] = std::move(decodeWorker);
 
-    return StreamError::None;
+    return retFmt;
+}
+
+std::expected<SampleFormat, StreamError> MediaSource::enableAudioStream(int streamIndex, std::vector<SampleFormat> requireSampleFormats)
+{
+    return std::unexpected(StreamError::InvalidIndex);
 }
 
 StreamError MediaSource::disableStream(int streamIndex)
@@ -377,6 +399,17 @@ void MediaSource::demuxWorkerFunc()
         auto& worker = it->second;
         worker->pushPacket(MediaPacket{PacketType::Normal, std::move(packet)});
     }
+}
+
+std::optional<std::shared_ptr<SwsConvertor>> MediaSource::createSwsConvertor(const fh::FramePtr& frame, AVPixelFormat target)
+{
+    if (!frame) return std::nullopt;
+    SwsConvertor::Options opts{};
+    opts.targetFormat = target;
+    auto sws = std::make_shared<SwsConvertor>(opts);
+    auto retFrame = sws->process(frame);
+    if (!retFrame) return std::nullopt;
+    return sws;
 }
 
 } // namespace media
