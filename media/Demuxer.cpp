@@ -20,7 +20,7 @@ Demuxer::Demuxer(const Options& options)
 
 bool Demuxer::initialize()
 {
-    auto ctxExp = fh::makeInputContext(m_url.c_str());
+    auto ctxExp = fh::makeInputContext(m_url.c_str(), {&Demuxer::interruptCallback, this});
     if (!ctxExp) {
         int err = ctxExp.error();
         LOG_ERROR(m_logger, "Failed to create input context: {}", fh::err2str(err));
@@ -36,6 +36,12 @@ bool Demuxer::initialize()
     return true;
 }
 
+int Demuxer::interruptCallback(void* opaque)
+{
+    auto* demuxer = static_cast<Demuxer*>(opaque);
+    return demuxer->m_interrupted.load() || demuxer->m_cancelled.load();
+}
+
 std::expected<fh::PacketPtr, int> Demuxer::readPacket()
 {
     fh::PacketPtr packet = fh::makePacket();
@@ -48,6 +54,27 @@ std::expected<fh::PacketPtr, int> Demuxer::readPacket()
         return std::unexpected(ret);
     }
     return packet;
+}
+
+void Demuxer::interrupt()
+{
+    m_interrupted.store(true);
+}
+
+void Demuxer::resetInterrupt()
+{
+    m_interrupted.store(false);
+}
+
+void Demuxer::cancel()
+{
+    m_cancelled.store(true);
+}
+
+void Demuxer::resume()
+{
+    m_interrupted.store(false);
+    m_cancelled.store(false);
 }
 
 int Demuxer::seek(int64_t timestamp)

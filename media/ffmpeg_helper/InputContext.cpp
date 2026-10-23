@@ -9,9 +9,16 @@ void InputContextDeleter::operator()(AVFormatContext* ctx) const
     }
 }
 
-std::expected<InputContextPtr, int> makeInputContext(const char* filePath)
+std::expected<InputContextPtr, int> makeInputContext(const char* filePath, AVIOInterruptCB interruptCallback)
 {
     AVFormatContext* ctx = nullptr;
+    if (interruptCallback.callback) {
+        ctx = avformat_alloc_context();
+        if (!ctx) {
+            return std::unexpected(AVERROR(ENOMEM));
+        }
+        ctx->interrupt_callback = interruptCallback;
+    }
     int ret = avformat_open_input(&ctx, filePath, nullptr, nullptr);
     if (ret < 0) {
         return std::unexpected(ret);

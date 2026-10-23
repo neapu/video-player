@@ -12,6 +12,9 @@ struct InputContextDeleter {
     void operator()(AVFormatContext* ctx) const;
 };
 using InputContextPtr = std::unique_ptr<AVFormatContext, InputContextDeleter>;
-std::expected<InputContextPtr, int> makeInputContext(const char* filePath);
+std::expected<InputContextPtr, int> makeInputContext(
+    const char* filePath,
+    AVIOInterruptCB interruptCallback = {}
+);
 
 } // namespace fh

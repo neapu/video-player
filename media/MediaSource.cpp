@@ -159,6 +159,9 @@ int64_t MediaSource::duration() const
 void MediaSource::seek(int64_t timestamp)
 {
     m_seekTarget = timestamp;
+    if (m_demuxRunning.load()) {
+        m_demuxer->interrupt();
+    }
     for (auto& decodeWorker: m_decodeWorkers) {
         decodeWorker.second->interrupt();
     }
@@ -176,6 +179,7 @@ StartError MediaSource::start()
         return StartError::NoStreamEnabled;
     }
 
+    m_demuxer->resume();
     m_demuxRunning.store(true);
     m_demuxThread = std::thread(&MediaSource::demuxWorkerFunc, this);
 
@@ -188,6 +192,7 @@ void MediaSource::stop()
         return;
     }
     m_demuxRunning.store(false);
+    m_demuxer->cancel();
     for (auto& decodeWorker: m_decodeWorkers) {
         decodeWorker.second->interrupt();
     }
@@ -568,8 +573,18 @@ void MediaSource::demuxWorkerFunc()
     while (m_demuxRunning.load()) {
         auto seekTarget = m_seekTarget.exchange(AV_NOPTS_VALUE);
         if (seekTarget != AV_NOPTS_VALUE) {
+            if (!m_demuxRunning.load()) {
+                break;
+            }
+            m_demuxer->resetInterrupt();
             int ret = m_demuxer->seek(seekTarget);
             if (ret < 0) {
+                if (ret == AVERROR_EXIT && !m_demuxRunning.load()) {
+                    break;
+                }
+                if (ret == AVERROR_EXIT && m_seekTarget.load() != AV_NOPTS_VALUE) {
+                    continue;
+                }
                 LOG_ERROR(m_logger, "Seek failed. error: {}", fh::err2str(ret));
                 m_onSeekComplete(SeekError::Unknown);
                 continue;
@@ -591,6 +606,12 @@ void MediaSource::demuxWorkerFunc()
         auto packetExp = m_demuxer->readPacket();
         if (!packetExp.has_value()) {
             int err = packetExp.error();
+            if (err == AVERROR_EXIT) {
+                if (!m_demuxRunning.load()) {
+                    break;
+                }
+                continue;
+            }
             if (err == AVERROR_EOF) {
                 // 为所有流都插入End包
                 for (auto& worker: m_decodeWorkers) {
