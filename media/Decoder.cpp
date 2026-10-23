@@ -1,13 +1,19 @@
 #include "Decoder.h"
 #include "ffmpeg_helper/FFmpegError.h"
+#ifdef _WIN32
 #include "D3d11vaDecoder.h"
+#endif
 
 namespace media {
 std::unique_ptr<Decoder> Decoder::create(const Options& options)
 {
     switch (options.type) {
         case Decoder::Type::D3d11va:
+#ifdef _WIN32
             return D3d11vaDecoder::create(options);
+#else
+            return nullptr;
+#endif
         case Decoder::Type::Software:
             {
                 std::unique_ptr<Decoder> decoder(new Decoder(options));

@@ -203,6 +203,7 @@ StreamError MediaSource::enableStream(int streamIndex, bool hardwareAccelerated,
         LOG_ERROR(m_logger, "Decoder test failed");
         return StreamError::DecoderCreationFailed;
     }
+    decoder->flush();
 
     // 根据解码器类型，估算包队列长度
     // 目标是视频缓存10秒，音频缓存3秒
@@ -260,7 +261,7 @@ MediaFramePtr MediaSource::nextFrame(int streamIndex)
     auto it = m_decodeWorkers.find(streamIndex);
     if (it == m_decodeWorkers.end()) {
         LOG_ERROR(m_logger, "Stream not found");
-        return nullptr;
+        return std::make_unique<MediaFrame>(FrameType::Empty);
     }
 
     auto& worker = it->second;
