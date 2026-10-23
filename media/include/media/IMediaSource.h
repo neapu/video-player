@@ -51,7 +51,7 @@ public:
      * @brief 获取媒体流信息。
      * @return 包含所有媒体流信息的数组。
      */
-    virtual std::vector<StreamInfo> getStreamInfo() const = 0;
+    virtual std::vector<StreamInfo> streamsInfo() const = 0;
 
     /**
      * @brief 启用指定的媒体流。

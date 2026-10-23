@@ -1,20 +1,20 @@
 #include "MediaPacket.h"
 
 namespace media {
-std::optional<MediaPacket> MediaPacket::createPacket(int64_t epoch, PacketType type)
+std::optional<MediaPacket> MediaPacket::createPacket(PacketType type)
 {
     if (type == PacketType::Normal) {
         auto packet = fh::makePacket();
         if (!packet) {
             return std::nullopt;
         }
-        return MediaPacket(epoch, type, std::move(packet));
+        return MediaPacket(type, std::move(packet));
     }
-    return MediaPacket(epoch, type, nullptr);
+    return MediaPacket(type, nullptr);
 }
 
-MediaPacket::MediaPacket(int64_t epoch, PacketType type, fh::PacketPtr&& packet)
-    : m_epoch(epoch), m_type(type), m_packet(std::move(packet))
+MediaPacket::MediaPacket(PacketType type, fh::PacketPtr&& packet)
+    : m_type(type), m_packet(std::move(packet))
 {
 }
 

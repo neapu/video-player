@@ -33,6 +33,9 @@ bool DecodeWorker::initialize()
 DecodeWorker::~DecodeWorker()
 {
     m_exitFlag = true;
+    m_packetQueueNotEmptyCondVar.notify_all();
+    m_packetQueueNotFullCondVar.notify_all();
+    m_frameQueueNotFullCondVar.notify_all();
     if (m_thread.joinable()) {
         m_thread.join();
     }
@@ -53,6 +56,13 @@ void DecodeWorker::interrupt()
 bool DecodeWorker::pushPacket(MediaPacket&& packet)
 {
     std::unique_lock<std::mutex> lock(m_packetQueueMutex);
+    // 控制包直接入队，不管队列大小和interrupt标识
+    if (packet.type() != PacketType::Normal && packet.type() != PacketType::Empty) {
+        m_packetQueue.push_back(std::move(packet));
+        m_packetQueueNotEmptyCondVar.notify_one();
+        return true;
+    }
+
     if (m_interrupted) {
         return false;
     }
@@ -77,6 +87,7 @@ MediaFrame DecodeWorker::popFrame()
     }
     auto frame = std::move(m_frameQueue.front());
     m_frameQueue.pop_front();
+    m_frameQueueNotFullCondVar.notify_one();
     return std::move(frame);
 }
 
@@ -85,7 +96,10 @@ void DecodeWorker::workerThreadFunc()
     while (!m_exitFlag) {
         if (m_interrupted) {
             std::lock_guard<std::mutex> lock(m_packetQueueMutex);
-            m_packetQueue.clear();
+            // 清除所有非 Flash 包
+            while (!m_packetQueue.empty() && m_packetQueue.front().type() != PacketType::Flush) {
+                m_packetQueue.pop_front();
+            }
             m_interrupted = false;
         }
         MediaPacket packet{};

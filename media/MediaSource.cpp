@@ -28,6 +28,9 @@ MediaSource::MediaSource(const Options& options)
 
 MediaSource::~MediaSource()
 {
+    stop();
+    // 释放所有解码器
+    m_decodeWorkers.clear();
 }
 
 CreateError MediaSource::initialize()
@@ -77,9 +80,29 @@ CreateError MediaSource::initialize()
     return CreateError::None;
 }
 
-std::vector<StreamInfo> MediaSource::getStreamInfo() const
+std::vector<StreamInfo> MediaSource::streamsInfo() const
 {
-    return {};
+    int count = m_demuxer->streamCount();
+    std::vector<StreamInfo> infos;
+    for (int i = 0; i < count; ++i) {
+        const AVStream* stream = m_demuxer->stream(i);
+        StreamInfo info{};
+        info.index = i;
+        if (stream->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
+            info.type = StreamType::Video;
+        } else if (stream->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
+            info.type = StreamType::Audio;
+        } else {
+            info.type = StreamType::Unknown;
+        }
+        info.codecName = avcodec_get_name(stream->codecpar->codec_id);
+        info.width = stream->codecpar->width;
+        info.height = stream->codecpar->height;
+        info.sampleRate = stream->codecpar->sample_rate;
+        info.channels = stream->codecpar->ch_layout.nb_channels;
+        infos.push_back(info);
+    }
+    return infos;
 }
 
 StreamError MediaSource::enableStream(int streamIndex, bool hardwareAccelerated, void* hardwareContext)
@@ -278,20 +301,29 @@ void MediaSource::stop()
 
 void MediaSource::demuxWorkerFunc()
 {
-    int retryCount = 0;
+    int retryCount{0};
+    bool end{false};
     while (m_demuxRunning.load()) {
         auto seekTarget = m_seekTarget.exchange(AV_NOPTS_VALUE);
         if (seekTarget != AV_NOPTS_VALUE) {
             int ret = m_demuxer->seek(seekTarget);
             if (ret < 0) {
                 LOG_ERROR(m_logger, "Seek failed. error: {}", fh::err2str(ret));
+                m_onSeekComplete(SeekError::Unknown);
                 continue;
             }
             retryCount = 0;
+            end = false;
             // 插入 Flash 包提醒解码线程
             for (auto& worker: m_decodeWorkers) {
-                worker.second->pushPacket(MediaPacket{m_epoch, PacketType::Flush, nullptr});
+                worker.second->pushPacket(MediaPacket{PacketType::Flush, nullptr});
             }
+            m_onSeekComplete(SeekError::None);
+        }
+        if (end) {
+            // 100ms 既不会太影响体验(感知不明显)，也不会太频繁占用CPU性能
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            continue;
         }
 
         auto packetExp = m_demuxer->readPacket();
@@ -300,8 +332,9 @@ void MediaSource::demuxWorkerFunc()
             if (err == AVERROR_EOF) {
                 // 为所有流都插入End包
                 for (auto& worker: m_decodeWorkers) {
-                    worker.second->pushPacket(MediaPacket{m_epoch, PacketType::End, nullptr});
+                    worker.second->pushPacket(MediaPacket{PacketType::End, nullptr});
                 }
+                end = true;
                 continue;
             }
             // 先重试20次，间隔20ms，如果还失败，上报错误，并将间隔调整到500ms
@@ -326,7 +359,7 @@ void MediaSource::demuxWorkerFunc()
             continue;
         }
         auto& worker = it->second;
-        worker->pushPacket(MediaPacket{m_epoch, PacketType::Normal, std::move(packet)});
+        worker->pushPacket(MediaPacket{PacketType::Normal, std::move(packet)});
     }
 }
 

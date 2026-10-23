@@ -11,7 +11,7 @@ public:
     ~MediaSource() override;
     static std::expected<std::unique_ptr<IMediaSource>, CreateError> create(const Options& options);
 
-    std::vector<StreamInfo> getStreamInfo() const override;
+    std::vector<StreamInfo> streamsInfo() const override;
     StreamError enableStream(
         int streamIndex, 
         bool hardwareAccelerated = false,
@@ -48,7 +48,6 @@ private:
 
     std::unordered_map<int, DecodeWorkerPtr> m_decodeWorkers;
 
-    int64_t m_epoch{0};
     std::atomic_int64_t m_seekTarget{AV_NOPTS_VALUE};
 };
 } // namespace media

@@ -11,9 +11,9 @@ enum class PacketType {
 };
 class MediaPacket {
 public:
-    static std::optional<MediaPacket> createPacket(int64_t epoch, PacketType type);
+    static std::optional<MediaPacket> createPacket(PacketType type);
 
-    MediaPacket(int64_t epoch = -1, PacketType type = PacketType::Empty, fh::PacketPtr&& packet = nullptr);
+    MediaPacket(PacketType type = PacketType::Empty, fh::PacketPtr&& packet = nullptr);
     MediaPacket(const MediaPacket&) = delete;
     MediaPacket& operator=(const MediaPacket&) = delete;
     MediaPacket(MediaPacket&&) = default;
@@ -21,13 +21,11 @@ public:
     ~MediaPacket() = default;
 
     PacketType type() const { return m_type; }
-    int64_t epoch() const { return m_epoch; }
     
     fh::PacketPtr releasePacket();
 
 private:
     PacketType m_type{PacketType::Empty};
-    int64_t m_epoch{0};
     fh::PacketPtr m_packet;
 
 };
