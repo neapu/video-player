@@ -33,6 +33,10 @@ private:
     bool initialize();
 
     void workerThreadFunc();
+    // 排空解码器：取出解码器内部缓存的帧，直到 EOF
+    void drainDecoder();
+    // 返回 false 表示已退出或被中断，调用方应停止解码
+    bool enqueueFrame(fh::FramePtr&& frame);
 
 private:
     int m_maxPacketQueueSize;
