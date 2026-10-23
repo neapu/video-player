@@ -1,7 +1,7 @@
 #include "DecodeWorker.h"
 
 namespace media {
-std::unique_ptr<DecodeWorker> DecodeWorker::create(const options& opts, std::unique_ptr<Decoder>&& decoder)
+std::unique_ptr<DecodeWorker> DecodeWorker::create(const Options& opts, std::unique_ptr<Decoder>&& decoder)
 {
     auto worker = std::unique_ptr<DecodeWorker>(new DecodeWorker(opts, std::move(decoder)));
     if (worker && worker->initialize()) {
@@ -10,7 +10,7 @@ std::unique_ptr<DecodeWorker> DecodeWorker::create(const options& opts, std::uni
     return nullptr;
 }
 
-DecodeWorker::DecodeWorker(const options& opts, std::unique_ptr<Decoder>&& decoder)
+DecodeWorker::DecodeWorker(const Options& opts, std::unique_ptr<Decoder>&& decoder)
     : m_maxPacketQueueSize(opts.maxPacketQueueSize)
     , m_maxFrameQueueSize(opts.maxFrameQueueSize)
     , m_logger(opts.logger)

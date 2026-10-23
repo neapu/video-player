@@ -21,7 +21,7 @@ public:
     MediaFramePtr nextFrame(int streamIndex) override;
     int64_t duration() const override;
     void seek(int64_t timestamp) override;
-    void start() override;
+    StartError start() override;
     void stop() override;
     bool running() const override 
     {
@@ -47,5 +47,8 @@ private:
     std::thread m_demuxThread;
 
     std::unordered_map<int, DecodeWorkerPtr> m_decodeWorkers;
+
+    int64_t m_epoch{0};
+    std::atomic_int64_t m_seekTarget{AV_NOPTS_VALUE};
 };
 } // namespace media

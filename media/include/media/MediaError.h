@@ -11,12 +11,15 @@ enum class CreateError {
      * @brief 没有有效的媒体流。
      */
     NoValidStream,
+    /**
+     * @brief 参数错误
+     */
+    InvalidArgument,
 };
 enum class RunningError {
     None,
     /**
      * @brief 读取媒体数据失败。
-     * @note 恢复方法：触发一次成功的 seek 操作。
      */
     ReadFailed
 };
@@ -53,5 +56,17 @@ enum class SeekError {
      * @brief 其他 seek 错误。
      */
     Unknown
+};
+enum class StartError {
+    None,
+    /**
+     * @brief 已经启动，无需再次启动。
+     */
+    AlreadyStarted,
+
+    /**
+     * @brief 没有启用任何流。
+     */
+    NoStreamEnabled
 };
 } // namespace media

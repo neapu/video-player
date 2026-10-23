@@ -11,13 +11,13 @@
 namespace media {
 class DecodeWorker {
 public:
-    struct options {
+    struct Options {
         int maxPacketQueueSize = 100;
         int maxFrameQueueSize = 5;
         LoggerPtr logger;
     };
 
-    static std::unique_ptr<DecodeWorker> create(const options& opts, std::unique_ptr<Decoder>&& decoder);
+    static std::unique_ptr<DecodeWorker> create(const Options& opts, std::unique_ptr<Decoder>&& decoder);
     DecodeWorker(const DecodeWorker&) = delete;
     DecodeWorker& operator=(const DecodeWorker&) = delete;
     DecodeWorker(DecodeWorker&&) = delete;
@@ -29,7 +29,7 @@ public:
 
     void interrupt();
 private:
-    DecodeWorker(const options& opts, std::unique_ptr<Decoder>&& decoder);
+    DecodeWorker(const Options& opts, std::unique_ptr<Decoder>&& decoder);
     bool initialize();
 
     void workerThreadFunc();

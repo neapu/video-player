@@ -86,4 +86,12 @@ AVStream* Demuxer::stream(int index)
     return m_inputContext->streams[index];
 }
 
+int64_t Demuxer::duration() const
+{
+    if (!m_inputContext) {
+        return 0;
+    }
+    return m_inputContext->duration;
+}
+
 } // namespace media

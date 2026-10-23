@@ -26,6 +26,8 @@ public:
     const AVStream* stream(int index) const;
     AVStream* stream(int index);
 
+    int64_t duration() const;
+
 private:
     Demuxer(const Options& options);
     bool initialize();

@@ -98,7 +98,7 @@ public:
     /**
      * @brief 开始读取并解码媒体数据。
      */
-    virtual void start() = 0;
+    virtual StartError start() = 0;
 
     /**
      * @brief 停止读取并解码媒体数据。
