@@ -206,7 +206,8 @@ StreamError MediaSource::enableStream(int streamIndex, bool hardwareAccelerated,
     // 由于包不携带时长信息（一包不一定对应一帧），视频根据帧率估算，音频根据采样率估算
     int packetQueueLength = 0;
     if (stream->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
-        int fps = stream->codecpar->framerate.num / stream->codecpar->framerate.den;
+        const auto frameRate = stream->codecpar->framerate;
+        int fps = frameRate.den > 0 ? frameRate.num / frameRate.den : 0;
         fps = fps > 0 ? fps : 120;  // 留足余量，不差这点内存
         packetQueueLength = fps * 10; // 10秒的视频缓存
         LOG_INFO(m_logger, "Estimated video packet queue length: {}", packetQueueLength);

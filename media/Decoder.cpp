@@ -76,7 +76,7 @@ bool Decoder::openCodec()
     FUNC_TRACE(m_logger, LogLevel::info);
     if (!m_codecContext) {
         LOG_ERROR(m_logger, "Codec context is not initialized");
-        return AVERROR(EINVAL);
+        return false;
     }
     int ret = avcodec_open2(m_codecContext.get(), m_codecContext->codec, nullptr);
     if (ret != 0) {

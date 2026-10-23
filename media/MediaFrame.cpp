@@ -83,7 +83,7 @@ media::ColorRange toColorRange(int range)
 media::ColorTransferCharacteristic toColorTrc(int trc)
 {
     switch (trc) {
-    case AVCOL_TRC_BT709:
+    case AVCOL_TRC_ARIB_STD_B67:
         return media::ColorTransferCharacteristic::Hlg;
     case AVCOL_TRC_SMPTE2084:
         return media::ColorTransferCharacteristic::Pq;
