@@ -74,6 +74,7 @@ public:
      * @param streamIndex 媒体流索引。
      * @param requireSampleFormats 期望的采样格式。
      * @return 成功返回实际使用的采样格式，失败返回错误。
+     * @note 启用流后必须消费，否则可能饿死其他流。只能在停止状态下操作流。
      */
     virtual std::expected<SampleFormat, StreamError> enableAudioStream(
         int streamIndex,

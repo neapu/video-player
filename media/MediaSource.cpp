@@ -10,6 +10,16 @@ std::expected<std::unique_ptr<IMediaSource>, CreateError> IMediaSource::create(c
     return MediaSource::create(options);
 }
 
+MediaSource::~MediaSource()
+{
+    stop();
+    // 释放所有解码器
+    m_decodeWorkers.clear();
+    if (m_logger) {
+        spdlog::drop(m_instanceName);
+    }
+}
+
 std::expected<std::unique_ptr<IMediaSource>, CreateError> MediaSource::create(const Options& options)
 {
     auto mediaSource = std::unique_ptr<MediaSource>(new MediaSource(options));
@@ -20,6 +30,173 @@ std::expected<std::unique_ptr<IMediaSource>, CreateError> MediaSource::create(co
     return std::move(mediaSource);
 }
 
+std::vector<StreamInfo> MediaSource::streamsInfo() const
+{
+    int count = m_demuxer->streamCount();
+    std::vector<StreamInfo> infos;
+    for (int i = 0; i < count; ++i) {
+        const AVStream* stream = m_demuxer->stream(i);
+        StreamInfo info{};
+        info.index = i;
+        if (stream->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
+            info.type = StreamType::Video;
+        } else if (stream->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
+            info.type = StreamType::Audio;
+        } else {
+            info.type = StreamType::Unknown;
+        }
+        info.codecName = avcodec_get_name(stream->codecpar->codec_id);
+        info.width = stream->codecpar->width;
+        info.height = stream->codecpar->height;
+        info.sampleRate = stream->codecpar->sample_rate;
+        info.channels = stream->codecpar->ch_layout.nb_channels;
+        infos.push_back(info);
+    }
+    return infos;
+}
+
+std::expected<PixelFormat, StreamError> MediaSource::enableVideoStream(
+    int streamIndex,
+    std::vector<PixelFormat> requirePixelFormats,
+    bool hardwareAccelerated,
+    void* hardwareContext
+)
+{
+    auto streamExp = validateVideoStream(streamIndex, requirePixelFormats);
+    if (!streamExp) {
+        return std::unexpected(streamExp.error());
+    }
+    auto* stream = *streamExp;
+
+    auto decoder = createVideoDecoder(stream, hardwareAccelerated, hardwareContext);
+    if (!decoder) {
+        LOG_ERROR(m_logger, "Failed to create decoder for video stream");
+        return std::unexpected(StreamError::DecoderCreationFailed);
+    }
+
+    auto testResult = testVideoDecoder(*decoder, streamIndex, requirePixelFormats);
+    if (!testResult) {
+        LOG_ERROR(m_logger, "Decoder test failed");
+        return std::unexpected(StreamError::DecoderCreationFailed);
+    }
+
+    auto decodeWorker = createVideoDecodeWorker(stream, std::move(decoder), testResult->convertor);
+    if (!decodeWorker) {
+        LOG_ERROR(m_logger, "Failed to create decode worker");
+        return std::unexpected(StreamError::DecoderCreationFailed);
+    }
+    m_decodeWorkers[streamIndex] = std::move(decodeWorker);
+
+    return testResult->pixelFormat;
+}
+
+std::expected<SampleFormat, StreamError> MediaSource::enableAudioStream(int streamIndex, std::vector<SampleFormat> requireSampleFormats)
+{
+    auto streamExp = validateAudioStream(streamIndex, requireSampleFormats);
+    if (!streamExp) {
+        return std::unexpected(streamExp.error());
+    }
+    auto* stream = *streamExp;
+
+    auto decoder = createAudioDecoder(stream);
+    if (!decoder) {
+        LOG_ERROR(m_logger, "Failed to create decoder for audio stream");
+        return std::unexpected(StreamError::DecoderCreationFailed);
+    }
+
+    auto testResult = testAudioDecoder(*decoder, streamIndex, requireSampleFormats);
+    if (!testResult) {
+        LOG_ERROR(m_logger, "Audio decoder test failed");
+        return std::unexpected(StreamError::DecoderCreationFailed);
+    }
+
+    auto decodeWorker = createAudioDecodeWorker(stream, std::move(decoder), testResult->convertor);
+    if (!decodeWorker) {
+        LOG_ERROR(m_logger, "Failed to create audio decode worker");
+        return std::unexpected(StreamError::DecoderCreationFailed);
+    }
+    m_decodeWorkers[streamIndex] = std::move(decodeWorker);
+
+    return testResult->sampleFormat;
+}
+
+StreamError MediaSource::disableStream(int streamIndex)
+{
+    if (m_demuxRunning) {
+        LOG_ERROR(m_logger, "Cannot enable video stream while demuxer is running");
+        return StreamError::DemuxerRunning;
+    }
+
+    auto it = m_decodeWorkers.find(streamIndex);
+    if (it == m_decodeWorkers.end()) {
+        LOG_ERROR(m_logger, "Stream not found");
+        return StreamError::InvalidIndex;
+    }
+
+    m_decodeWorkers.erase(it);
+
+    return StreamError::None;
+}
+
+MediaFramePtr MediaSource::nextFrame(int streamIndex)
+{
+    auto it = m_decodeWorkers.find(streamIndex);
+    if (it == m_decodeWorkers.end()) {
+        LOG_ERROR(m_logger, "Stream not found");
+        return std::make_unique<MediaFrame>(FrameType::Empty);
+    }
+
+    auto& worker = it->second;
+    auto frame = worker->popFrame();
+    return std::make_unique<MediaFrame>(std::move(frame));
+}
+
+int64_t MediaSource::duration() const
+{
+    return m_demuxer ? m_demuxer->duration() : 0;
+}
+
+void MediaSource::seek(int64_t timestamp)
+{
+    m_seekTarget = timestamp;
+    for (auto& decodeWorker: m_decodeWorkers) {
+        decodeWorker.second->interrupt();
+    }
+}
+
+StartError MediaSource::start()
+{
+    if (m_demuxRunning.load()) {
+        LOG_ERROR(m_logger, "Already started");
+        return StartError::AlreadyStarted;
+    }
+
+    if (m_decodeWorkers.empty()) {
+        LOG_ERROR(m_logger, "No stream enabled");
+        return StartError::NoStreamEnabled;
+    }
+
+    m_demuxRunning.store(true);
+    m_demuxThread = std::thread(&MediaSource::demuxWorkerFunc, this);
+
+    return StartError::None;
+}
+
+void MediaSource::stop()
+{
+    if (!m_demuxRunning.load()) {
+        return;
+    }
+    m_demuxRunning.store(false);
+    for (auto& decodeWorker: m_decodeWorkers) {
+        decodeWorker.second->interrupt();
+    }
+
+    if (m_demuxThread.joinable()) {
+        m_demuxThread.join();
+    }
+}
+
 MediaSource::MediaSource(const Options& options)
     : m_source(options.source),
       m_logDir(options.logDir),
@@ -27,16 +204,6 @@ MediaSource::MediaSource(const Options& options)
       m_onSeekComplete(options.onSeekComplete),
       m_onRunningError(options.onRunningError)
 {
-}
-
-MediaSource::~MediaSource()
-{
-    stop();
-    // 释放所有解码器
-    m_decodeWorkers.clear();
-    if (m_logger) {
-        spdlog::drop(m_instanceName);
-    }
 }
 
 CreateError MediaSource::initialize()
@@ -96,31 +263,6 @@ CreateError MediaSource::initialize()
     return CreateError::None;
 }
 
-std::vector<StreamInfo> MediaSource::streamsInfo() const
-{
-    int count = m_demuxer->streamCount();
-    std::vector<StreamInfo> infos;
-    for (int i = 0; i < count; ++i) {
-        const AVStream* stream = m_demuxer->stream(i);
-        StreamInfo info{};
-        info.index = i;
-        if (stream->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
-            info.type = StreamType::Video;
-        } else if (stream->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
-            info.type = StreamType::Audio;
-        } else {
-            info.type = StreamType::Unknown;
-        }
-        info.codecName = avcodec_get_name(stream->codecpar->codec_id);
-        info.width = stream->codecpar->width;
-        info.height = stream->codecpar->height;
-        info.sampleRate = stream->codecpar->sample_rate;
-        info.channels = stream->codecpar->ch_layout.nb_channels;
-        infos.push_back(info);
-    }
-    return infos;
-}
-
 std::expected<AVStream*, StreamError> MediaSource::validateVideoStream(
     int streamIndex,
     const std::vector<PixelFormat>& requirePixelFormats
@@ -158,6 +300,45 @@ std::expected<AVStream*, StreamError> MediaSource::validateVideoStream(
     return stream;
 }
 
+std::expected<AVStream*, StreamError> MediaSource::validateAudioStream(
+    int streamIndex,
+    const std::vector<SampleFormat>& requireSampleFormats
+) const
+{
+    if (m_demuxRunning) {
+        LOG_ERROR(m_logger, "Cannot enable audio stream while demuxer is running");
+        return std::unexpected(StreamError::DemuxerRunning);
+    }
+
+    if (m_decodeWorkers.contains(streamIndex)) {
+        LOG_ERROR(m_logger, "Audio stream already enabled");
+        return std::unexpected(StreamError::StreamAlreadyEnabled);
+    }
+
+    if (streamIndex < 0 || streamIndex >= m_demuxer->streamCount()) {
+        LOG_ERROR(m_logger, "Invalid stream index");
+        return std::unexpected(StreamError::InvalidIndex);
+    }
+
+    AVStream* stream = m_demuxer->stream(streamIndex);
+    if (!stream) {
+        LOG_ERROR(m_logger, "Invalid stream index");
+        return std::unexpected(StreamError::InvalidIndex);
+    }
+
+    if (stream->codecpar->codec_type != AVMEDIA_TYPE_AUDIO) {
+        LOG_ERROR(m_logger, "Stream type mismatch: expected audio");
+        return std::unexpected(StreamError::StreamTypeMismatch);
+    }
+
+    if (requireSampleFormats.empty()) {
+        LOG_ERROR(m_logger, "Requested sample formats are empty");
+        return std::unexpected(StreamError::RequestFormatEmpty);
+    }
+
+    return stream;
+}
+
 std::unique_ptr<Decoder> MediaSource::createVideoDecoder(AVStream* stream, bool hardwareAccelerated, void* hardwareContext)
 {
     Decoder::Options decoderOptions{};
@@ -171,6 +352,15 @@ std::unique_ptr<Decoder> MediaSource::createVideoDecoder(AVStream* stream, bool 
     } else {
         decoderOptions.type = Decoder::Type::Software;
     }
+    decoderOptions.stream = stream;
+    decoderOptions.logger = m_logger;
+    return Decoder::create(decoderOptions);
+}
+
+std::unique_ptr<Decoder> MediaSource::createAudioDecoder(AVStream* stream)
+{
+    Decoder::Options decoderOptions{};
+    decoderOptions.type = Decoder::Type::Software;
     decoderOptions.stream = stream;
     decoderOptions.logger = m_logger;
     return Decoder::create(decoderOptions);
@@ -241,6 +431,91 @@ std::optional<MediaSource::VideoDecoderTestResult> MediaSource::testVideoDecoder
     return result;
 }
 
+std::optional<MediaSource::AudioDecoderTestResult> MediaSource::testAudioDecoder(
+    Decoder& decoder,
+    int streamIndex,
+    const std::vector<SampleFormat>& requireSampleFormats
+)
+{
+    AudioDecoderTestResult result{SampleFormat::None, nullptr};
+    bool testSuccess{false};
+    for (int i = 0; i < 30; ++i) {
+        auto packetExp = m_demuxer->readPacket();
+        if (!packetExp) {
+            int err = packetExp.error();
+            LOG_ERROR(m_logger, "Failed to read packet from demuxer. Error: {}", fh::err2str(err));
+            break;
+        }
+        auto packet = std::move(*packetExp);
+        if (packet->stream_index != streamIndex) {
+            continue;
+        }
+        int ret = decoder.sendPacket(std::move(packet));
+        if (ret < 0) {
+            LOG_ERROR(m_logger, "Failed to send packet to decoder. Error: {}", fh::err2str(ret));
+            break;
+        }
+
+        bool receiveError{false};
+        while (true) {
+            auto frameExp = decoder.receiveFrame();
+            if (!frameExp) {
+                int err = frameExp.error();
+                if (err == AVERROR(EAGAIN) || err == AVERROR_EOF) {
+                    break;
+                }
+                LOG_ERROR(m_logger, "Failed to receive frame from decoder. Error: {}", fh::err2str(err));
+                receiveError = true;
+                break;
+            }
+
+            auto frame = std::move(*frameExp);
+            const auto frameFormat = MediaFrame::toSampleFormat(static_cast<AVSampleFormat>(frame->format));
+            if (frameFormat != SampleFormat::None &&
+                std::find(requireSampleFormats.begin(), requireSampleFormats.end(), frameFormat) != requireSampleFormats.end()) {
+                result.sampleFormat = frameFormat;
+            } else {
+                auto targetFormat = std::find_if(requireSampleFormats.begin(), requireSampleFormats.end(), [](SampleFormat format) {
+                    return MediaFrame::toAvSampleFormat(format) != AV_SAMPLE_FMT_NONE;
+                });
+                if (targetFormat == requireSampleFormats.end()) {
+                    LOG_ERROR(m_logger, "No supported requested audio sample format");
+                    receiveError = true;
+                    break;
+                }
+
+                SwrConvertor::Options convertorOptions{};
+                convertorOptions.targetFormat = MediaFrame::toAvSampleFormat(*targetFormat);
+                convertorOptions.logger = m_logger;
+                auto convertor = std::make_shared<SwrConvertor>(convertorOptions);
+                if (!convertor->process(frame)) {
+                    LOG_ERROR(m_logger, "Failed to convert decoded audio frame to requested sample format");
+                    receiveError = true;
+                    break;
+                }
+                result.sampleFormat = *targetFormat;
+                result.convertor = std::move(convertor);
+            }
+
+            testSuccess = true;
+            break;
+        }
+        if (receiveError) {
+            break;
+        }
+        if (testSuccess) {
+            break;
+        }
+    }
+
+    m_demuxer->seek(0);
+    if (!testSuccess) {
+        return std::nullopt;
+    }
+    decoder.flush();
+    return result;
+}
+
 DecodeWorkerPtr MediaSource::createVideoDecodeWorker(
     AVStream* stream,
     std::unique_ptr<Decoder>&& decoder,
@@ -264,121 +539,26 @@ DecodeWorkerPtr MediaSource::createVideoDecodeWorker(
     return DecodeWorker::create(decodeWorkerOpts, std::move(decoder));
 }
 
-std::expected<PixelFormat, StreamError> MediaSource::enableVideoStream(
-    int streamIndex,
-    std::vector<PixelFormat> requirePixelFormats,
-    bool hardwareAccelerated,
-    void* hardwareContext
+DecodeWorkerPtr MediaSource::createAudioDecodeWorker(
+    AVStream* stream,
+    std::unique_ptr<Decoder>&& decoder,
+    FrameProcessorPtr processor
 )
 {
-    auto streamExp = validateVideoStream(streamIndex, requirePixelFormats);
-    if (!streamExp) {
-        return std::unexpected(streamExp.error());
-    }
-    auto* stream = *streamExp;
+    const int sampleRate = stream->codecpar->sample_rate;
+    const int frameSize = stream->codecpar->frame_size;
+    const int packetsPerSecond = sampleRate > 0 && frameSize > 0
+        ? (sampleRate + frameSize - 1) / frameSize
+        : 100;
+    const int packetQueueLength = std::max(1, packetsPerSecond * 3);
+    LOG_INFO(m_logger, "Estimated audio packet queue length: {}", packetQueueLength);
 
-    auto decoder = createVideoDecoder(stream, hardwareAccelerated, hardwareContext);
-    if (!decoder) {
-        LOG_ERROR(m_logger, "Failed to create decoder for video stream");
-        return std::unexpected(StreamError::DecoderCreationFailed);
-    }
-
-    auto testResult = testVideoDecoder(*decoder, streamIndex, requirePixelFormats);
-    if (!testResult) {
-        LOG_ERROR(m_logger, "Decoder test failed");
-        return std::unexpected(StreamError::DecoderCreationFailed);
-    }
-
-    auto decodeWorker = createVideoDecodeWorker(stream, std::move(decoder), testResult->convertor);
-    if (!decodeWorker) {
-        LOG_ERROR(m_logger, "Failed to create decode worker");
-        return std::unexpected(StreamError::DecoderCreationFailed);
-    }
-    m_decodeWorkers[streamIndex] = std::move(decodeWorker);
-
-    return testResult->pixelFormat;
-}
-
-std::expected<SampleFormat, StreamError> MediaSource::enableAudioStream(int streamIndex, std::vector<SampleFormat> requireSampleFormats)
-{
-    return std::unexpected(StreamError::InvalidIndex);
-}
-
-StreamError MediaSource::disableStream(int streamIndex)
-{
-    if (m_demuxRunning) {
-        LOG_ERROR(m_logger, "Cannot enable video stream while demuxer is running");
-        return StreamError::DemuxerRunning;
-    }
-
-    auto it = m_decodeWorkers.find(streamIndex);
-    if (it == m_decodeWorkers.end()) {
-        LOG_ERROR(m_logger, "Stream not found");
-        return StreamError::InvalidIndex;
-    }
-
-    m_decodeWorkers.erase(it);
-
-    return StreamError::None;
-}
-
-MediaFramePtr MediaSource::nextFrame(int streamIndex)
-{
-    auto it = m_decodeWorkers.find(streamIndex);
-    if (it == m_decodeWorkers.end()) {
-        LOG_ERROR(m_logger, "Stream not found");
-        return std::make_unique<MediaFrame>(FrameType::Empty);
-    }
-
-    auto& worker = it->second;
-    auto frame = worker->popFrame();
-    return std::make_unique<MediaFrame>(std::move(frame));
-}
-
-int64_t MediaSource::duration() const
-{
-    return m_demuxer ? m_demuxer->duration() : 0;
-}
-
-void MediaSource::seek(int64_t timestamp)
-{
-    m_seekTarget = timestamp;
-    for (auto& decodeWorker: m_decodeWorkers) {
-        decodeWorker.second->interrupt();
-    }
-}
-
-StartError MediaSource::start()
-{
-    if (m_demuxRunning.load()) {
-        LOG_ERROR(m_logger, "Already started");
-        return StartError::AlreadyStarted;
-    }
-
-    if (m_decodeWorkers.empty()) {
-        LOG_ERROR(m_logger, "No stream enabled");
-        return StartError::NoStreamEnabled;
-    }
-    
-    m_demuxRunning.store(true);
-    m_demuxThread = std::thread(&MediaSource::demuxWorkerFunc, this);
-
-    return StartError::None;
-}
-
-void MediaSource::stop()
-{
-    if (!m_demuxRunning.load()) {
-        return;
-    }
-    m_demuxRunning.store(false);
-    for (auto& decodeWorker: m_decodeWorkers) {
-        decodeWorker.second->interrupt();
-    }
-
-    if (m_demuxThread.joinable()) {
-        m_demuxThread.join();
-    }
+    DecodeWorker::Options decodeWorkerOpts;
+    decodeWorkerOpts.maxPacketQueueSize = packetQueueLength;
+    decodeWorkerOpts.maxFrameQueueSize = 30;
+    decodeWorkerOpts.processor = std::move(processor);
+    decodeWorkerOpts.logger = m_logger;
+    return DecodeWorker::create(decodeWorkerOpts, std::move(decoder));
 }
 
 void MediaSource::demuxWorkerFunc()

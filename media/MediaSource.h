@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include "DecodeWorker.h"
 #include "SwsConvertor.h"
+#include "SwrConvertor.h"
 
 namespace media {
 class MediaSource : public IMediaSource {
@@ -42,18 +43,37 @@ private:
         PixelFormat pixelFormat;
         std::shared_ptr<SwsConvertor> convertor;
     };
+    struct AudioDecoderTestResult {
+        SampleFormat sampleFormat;
+        std::shared_ptr<SwrConvertor> convertor;
+    };
 
     std::expected<AVStream*, StreamError> validateVideoStream(
         int streamIndex,
         const std::vector<PixelFormat>& requirePixelFormats
     ) const;
+    std::expected<AVStream*, StreamError> validateAudioStream(
+        int streamIndex,
+        const std::vector<SampleFormat>& requireSampleFormats
+    ) const;
     std::unique_ptr<Decoder> createVideoDecoder(AVStream* stream, bool hardwareAccelerated, void* hardwareContext);
+    std::unique_ptr<Decoder> createAudioDecoder(AVStream* stream);
     std::optional<VideoDecoderTestResult> testVideoDecoder(
         Decoder& decoder,
         int streamIndex,
         const std::vector<PixelFormat>& requirePixelFormats
     );
+    std::optional<AudioDecoderTestResult> testAudioDecoder(
+        Decoder& decoder,
+        int streamIndex,
+        const std::vector<SampleFormat>& requireSampleFormats
+    );
     DecodeWorkerPtr createVideoDecodeWorker(
+        AVStream* stream,
+        std::unique_ptr<Decoder>&& decoder,
+        FrameProcessorPtr processor
+    );
+    DecodeWorkerPtr createAudioDecodeWorker(
         AVStream* stream,
         std::unique_ptr<Decoder>&& decoder,
         FrameProcessorPtr processor
