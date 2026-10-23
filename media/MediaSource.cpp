@@ -32,6 +32,9 @@ MediaSource::~MediaSource()
     stop();
     // 释放所有解码器
     m_decodeWorkers.clear();
+    if (m_logger) {
+        spdlog::drop(m_instanceName);
+    }
 }
 
 CreateError MediaSource::initialize()
