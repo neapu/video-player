@@ -38,6 +38,27 @@ private:
     MediaSource(const Options& options);
     CreateError initialize();
 
+    struct VideoDecoderTestResult {
+        PixelFormat pixelFormat;
+        std::shared_ptr<SwsConvertor> convertor;
+    };
+
+    std::expected<AVStream*, StreamError> validateVideoStream(
+        int streamIndex,
+        const std::vector<PixelFormat>& requirePixelFormats
+    ) const;
+    std::unique_ptr<Decoder> createVideoDecoder(AVStream* stream, bool hardwareAccelerated, void* hardwareContext);
+    std::optional<VideoDecoderTestResult> testVideoDecoder(
+        Decoder& decoder,
+        int streamIndex,
+        const std::vector<PixelFormat>& requirePixelFormats
+    );
+    DecodeWorkerPtr createVideoDecodeWorker(
+        AVStream* stream,
+        std::unique_ptr<Decoder>&& decoder,
+        FrameProcessorPtr processor
+    );
+
     void demuxWorkerFunc();
 
     std::optional<std::shared_ptr<SwsConvertor>> createSwsConvertor(const fh::FramePtr& frame, AVPixelFormat target);
