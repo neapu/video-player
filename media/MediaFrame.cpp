@@ -40,8 +40,16 @@ media::SampleFormat toSampleFormat(int format)
     switch (format) {
     case AV_SAMPLE_FMT_S16:
         return media::SampleFormat::S16le;
+    case AV_SAMPLE_FMT_S16P:
+        return media::SampleFormat::S16lePlanar;
+    case AV_SAMPLE_FMT_S32:
+        return media::SampleFormat::S32le;
+    case AV_SAMPLE_FMT_S32P:
+        return media::SampleFormat::S32lePlanar;
     case AV_SAMPLE_FMT_FLT:
         return media::SampleFormat::Flt;
+    case AV_SAMPLE_FMT_FLTP:
+        return media::SampleFormat::FltPlanar;
     default:
         return media::SampleFormat::None;
     }
@@ -51,8 +59,16 @@ AVSampleFormat toAvSampleFormat(media::SampleFormat format)
     switch (format) {
     case media::SampleFormat::S16le:
         return AV_SAMPLE_FMT_S16;
+    case media::SampleFormat::S16lePlanar:
+        return AV_SAMPLE_FMT_S16P;
+    case media::SampleFormat::S32le:
+        return AV_SAMPLE_FMT_S32;
+    case media::SampleFormat::S32lePlanar:
+        return AV_SAMPLE_FMT_S32P;
     case media::SampleFormat::Flt:
         return AV_SAMPLE_FMT_FLT;
+    case media::SampleFormat::FltPlanar:
+        return AV_SAMPLE_FMT_FLTP;
     default:
         return AV_SAMPLE_FMT_NONE;
     }

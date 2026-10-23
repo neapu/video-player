@@ -35,11 +35,14 @@ enum class ColorTransferCharacteristic {
     Hlg,
 };
 
-// 音频采样格式，没有特殊说明都为交错格式
 enum class SampleFormat {
     None,
     S16le,
-    Flt
+    S16lePlanar,
+    S32le,
+    S32lePlanar,
+    Flt,
+    FltPlanar
 };
 
 struct FrameFormat {
