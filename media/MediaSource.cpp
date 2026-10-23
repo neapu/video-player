@@ -1,5 +1,6 @@
 #include "MediaSource.h"
 #include "ffmpeg_helper/FFmpegError.h"
+#include <exception>
 
 namespace media {
 std::expected<std::unique_ptr<IMediaSource>, CreateError> IMediaSource::create(const Options& options)
@@ -39,7 +40,17 @@ CreateError MediaSource::initialize()
         m_instanceName = "default";
     }
     if (!m_logDir.empty()) {
-        m_logger = createLogger(m_instanceName, m_logDir);
+        if (spdlog::get(m_instanceName)) {
+            return CreateError::LoggerNameAlreadyExists;
+        }
+        try {
+            m_logger = createLogger(m_instanceName, m_logDir);
+        } catch (const std::exception&) {
+            if (spdlog::get(m_instanceName)) {
+                return CreateError::LoggerNameAlreadyExists;
+            }
+            return CreateError::LoggerCreationFailed;
+        }
     }
 
     if (!m_onRunningError || !m_onSeekComplete) {

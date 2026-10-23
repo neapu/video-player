@@ -15,6 +15,14 @@ enum class CreateError {
      * @brief 参数错误
      */
     InvalidArgument,
+    /**
+     * @brief 创建日志记录器失败。
+     */
+    LoggerCreationFailed,
+    /**
+     * @brief 日志记录器实例名称已被占用。
+     */
+    LoggerNameAlreadyExists,
 };
 enum class RunningError {
     None,
