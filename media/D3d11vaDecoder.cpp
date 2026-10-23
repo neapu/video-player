@@ -53,6 +53,8 @@ bool D3d11vaDecoder::createHardwareContext(const AVStream* stream)
         d3d11DeviceCtx->device->AddRef();
         int ret = av_hwdevice_ctx_init(hwDeviceCtx);
         if (ret < 0) {
+            av_buffer_unref(&hwDeviceCtx);
+            hwDeviceCtx = nullptr;
             LOG_ERROR(m_logger, "Failed to initialize D3D11 device context", fh::err2str(ret));
             return false;
         }
