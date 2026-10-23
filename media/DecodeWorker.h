@@ -2,6 +2,7 @@
 #include <thread>
 #include <deque>
 #include <mutex>
+#include <atomic>
 #include <condition_variable>
 #include "MediaPacket.h"
 #include "MediaFrame.h"
@@ -55,7 +56,7 @@ private:
     // 帧队列出队不阻塞
     std::condition_variable m_frameQueueNotFullCondVar;
 
-    bool m_interrupted;
+    std::atomic_bool m_interrupted{false};
     std::atomic_bool m_exitFlag{false};
 };
 using DecodeWorkerPtr = std::unique_ptr<DecodeWorker>;

@@ -15,7 +15,6 @@ DecodeWorker::DecodeWorker(const Options& opts, std::unique_ptr<Decoder>&& decod
     , m_maxFrameQueueSize(opts.maxFrameQueueSize)
     , m_logger(opts.logger)
     , m_decoder(std::move(decoder))
-    , m_interrupted(false)
 {
 }
 
