@@ -1,6 +1,7 @@
 #pragma once
 #include "FrameProcessor.h"
 #include "Logger.h"
+#include "ffmpeg_helper/SwsContext.h"
 
 namespace media {
 class SwsConvertor : public FrameProcessor {
@@ -18,5 +19,13 @@ public:
     fh::FramePtr process(const fh::FramePtr& frame) override;
 
     AVPixelFormat targetFormat() const;
+
+private:
+    AVPixelFormat m_targetFormat{AV_PIX_FMT_NONE};
+    int m_targetWidth{0};
+    int m_targetHeight{0};
+    AVPixelFormat m_outputFormat{AV_PIX_FMT_NONE};
+    fh::SwsContextPtr m_swsContext;
+    LoggerPtr m_logger{nullptr};
 };
 } // namespace media
