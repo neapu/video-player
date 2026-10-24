@@ -1,5 +1,6 @@
 #pragma once
 #include <thread>
+#include <mutex>
 #include "media/IMediaSource.h"
 #include "Demuxer.h"
 #include <unordered_map>
@@ -94,6 +95,13 @@ private:
     
     std::atomic_bool m_demuxRunning{false};
     std::thread m_demuxThread;
+
+    // 保护 m_demuxRunning 的状态迁移、m_demuxThread 和 m_decodeWorkers 的访问。
+    // 只在公开接口(start/stop/enable*/disableStream/seek/nextFrame)中获取；
+    // demuxWorkerFunc 绝不能获取此锁(stop() 持锁 join demux 线程，加了就死锁)，
+    // 它对 m_decodeWorkers 的无锁读依赖：写 map 前必须确认 m_demuxRunning 为 false，
+    // 而 stop() 在持锁状态下 join 完 demux 线程才放锁。
+    std::mutex m_stateMutex;
 
     std::unordered_map<int, DecodeWorkerPtr> m_decodeWorkers;
 

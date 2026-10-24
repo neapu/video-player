@@ -62,6 +62,7 @@ std::expected<PixelFormat, StreamError> MediaSource::enableVideoStream(
     void* hardwareContext
 )
 {
+    std::lock_guard<std::mutex> lock(m_stateMutex);
     auto streamExp = validateVideoStream(streamIndex, requirePixelFormats);
     if (!streamExp) {
         return std::unexpected(streamExp.error());
@@ -92,6 +93,7 @@ std::expected<PixelFormat, StreamError> MediaSource::enableVideoStream(
 
 std::expected<SampleFormat, StreamError> MediaSource::enableAudioStream(int streamIndex, std::vector<SampleFormat> requireSampleFormats)
 {
+    std::lock_guard<std::mutex> lock(m_stateMutex);
     auto streamExp = validateAudioStream(streamIndex, requireSampleFormats);
     if (!streamExp) {
         return std::unexpected(streamExp.error());
@@ -122,8 +124,9 @@ std::expected<SampleFormat, StreamError> MediaSource::enableAudioStream(int stre
 
 StreamError MediaSource::disableStream(int streamIndex)
 {
+    std::lock_guard<std::mutex> lock(m_stateMutex);
     if (m_demuxRunning) {
-        LOG_ERROR(m_logger, "Cannot enable video stream while demuxer is running");
+        LOG_ERROR(m_logger, "Cannot disable stream while demuxer is running");
         return StreamError::DemuxerRunning;
     }
 
@@ -140,6 +143,8 @@ StreamError MediaSource::disableStream(int streamIndex)
 
 MediaFramePtr MediaSource::nextFrame(int streamIndex)
 {
+    // popFrame 不阻塞，持锁调用安全；加锁防止与 disableStream 并发导致 use-after-free
+    std::lock_guard<std::mutex> lock(m_stateMutex);
     auto it = m_decodeWorkers.find(streamIndex);
     if (it == m_decodeWorkers.end()) {
         LOG_ERROR(m_logger, "Stream not found");
@@ -162,6 +167,7 @@ void MediaSource::seek(int64_t timestamp)
     if (m_demuxRunning.load()) {
         m_demuxer->interrupt();
     }
+    std::lock_guard<std::mutex> lock(m_stateMutex);
     for (auto& decodeWorker: m_decodeWorkers) {
         decodeWorker.second->interrupt();
     }
@@ -169,6 +175,7 @@ void MediaSource::seek(int64_t timestamp)
 
 StartError MediaSource::start()
 {
+    std::lock_guard<std::mutex> lock(m_stateMutex);
     if (m_demuxRunning.load()) {
         LOG_ERROR(m_logger, "Already started");
         return StartError::AlreadyStarted;
@@ -188,6 +195,8 @@ StartError MediaSource::start()
 
 void MediaSource::stop()
 {
+    // 必须持锁 join：保证 demux 线程存活期间没有其他线程能拿到锁去写 m_decodeWorkers
+    std::lock_guard<std::mutex> lock(m_stateMutex);
     if (!m_demuxRunning.load()) {
         return;
     }
@@ -568,6 +577,10 @@ DecodeWorkerPtr MediaSource::createAudioDecodeWorker(
 
 void MediaSource::demuxWorkerFunc()
 {
+    // 此函数运行在 m_demuxThread 上，禁止获取 m_stateMutex：
+    // stop() 持锁 join 本线程，加了就死锁。
+    // 对 m_decodeWorkers 的无锁读是安全的：修改 map 的接口都要求 m_demuxRunning 为 false，
+    // 而 stop() 会在放锁前 join 掉本线程（见 MediaSource.h 中 m_stateMutex 的说明）。
     int retryCount{0};
     bool end{false};
     while (m_demuxRunning.load()) {
