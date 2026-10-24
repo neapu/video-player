@@ -215,10 +215,10 @@ void* MediaFrame::release()
 int64_t MediaFrame::pts() const
 {
     if (!m_frame) {
-        return 0;
+        return AV_NOPTS_VALUE;
     }
     if (m_frame->time_base.num == 0 || m_frame->time_base.den == 0) {
-        return 0;
+        return AV_NOPTS_VALUE;
     }
     return av_rescale_q(m_frame->pts, m_frame->time_base, AVRational{1, 1000000}); // Convert to microseconds
 }
