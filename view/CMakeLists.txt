@@ -10,6 +10,8 @@ qt_add_executable(${EXE_NAME}
     MainWindow.cpp
     Controller.h
     Controller.cpp
+    LogManager.h
+    LogManager.cpp
 )
 
 add_subdirectory(video_renderer)
@@ -18,6 +20,7 @@ add_subdirectory(audio_renderer)
 target_link_libraries(${EXE_NAME} PRIVATE
     Qt6::Core
     Qt6::Widgets
+    spdlog
     media
 )
 

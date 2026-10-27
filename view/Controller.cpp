@@ -8,7 +8,12 @@ Controller::~Controller() {}
 
 void Controller::openFile(const QString& filePath)
 {
-    // Implement file opening logic here
+    if (state() != State::Stopped) {
+        stop();
+    }
+
+    using namespace media;
+    IMediaSource::Options opts;
 }
 
 void Controller::pauseOrResume()
@@ -19,6 +24,18 @@ void Controller::pauseOrResume()
 void Controller::stop()
 {
     // Implement stop logic here
+}
+
+void Controller::setState(State state)
+{
+    QMutexLocker lock(&m_stateMutex);
+    m_state = state;
+}
+
+Controller::State Controller::state() const
+{
+    QMutexLocker lock(&m_stateMutex);
+    return m_state;
 }
 
 } // namespace view
