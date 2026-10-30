@@ -88,4 +88,11 @@ enum class StartError {
 enum class ProcessError {
     None,
 };
+
+std::string errToString(CreateError err);
+std::string errToString(RunningError err);
+std::string errToString(StreamError err);
+std::string errToString(SeekError err);
+std::string errToString(StartError err);
+std::string errToString(ProcessError err);
 } // namespace media

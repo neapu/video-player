@@ -67,6 +67,8 @@ enum class FrameType {
 
 class IMediaFrame {
 public:
+    static std::unique_ptr<IMediaFrame> makeEmptyFrame();
+
     virtual ~IMediaFrame() = default;
 
     /**

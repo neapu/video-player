@@ -20,6 +20,10 @@ struct StreamInfo {
     std::string codecName{};
     int width{0};
     int height{0};
+    struct FrameRate {
+        int num{0};
+        int den{1};
+    } frameRate;
     int sampleRate{0};
     int channels{0};
 };

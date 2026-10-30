@@ -14,7 +14,7 @@ qt_add_executable(${EXE_NAME}
     LogManager.cpp
 )
 
-add_subdirectory(video_renderer)
+add_subdirectory(gl_video_renderer)
 add_subdirectory(audio_renderer)
 
 target_link_libraries(${EXE_NAME} PRIVATE

@@ -111,6 +111,11 @@ media::ColorTransferCharacteristic toColorTrc(int trc)
 }
 
 namespace media {
+std::unique_ptr<IMediaFrame> IMediaFrame::makeEmptyFrame()
+{
+    return std::make_unique<MediaFrame>(FrameType::Empty, nullptr);
+}
+
 std::optional<MediaFrame> MediaFrame::createFrame(FrameType type)
 {
     if (type != FrameType::Normal) {
