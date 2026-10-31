@@ -1,6 +1,10 @@
 #include "SwsConvertor.h"
 #include "ffmpeg_helper/FFmpegError.h"
 
+extern "C" {
+#include <libavutil/opt.h>
+}
+
 namespace media {
 SwsConvertor::SwsConvertor(const Options& opts)
     : m_targetFormat(opts.targetFormat)
@@ -12,6 +16,8 @@ SwsConvertor::SwsConvertor(const Options& opts)
     if (!m_swsContext) {
         LOG_ERROR(m_logger, "Failed to allocate video scaler context");
     }
+    // 开启多线程
+    av_opt_set_int(m_swsContext.get(), "threads", 0, 0);
 }
 
 fh::FramePtr SwsConvertor::process(const fh::FramePtr& frame)
@@ -64,10 +70,5 @@ fh::FramePtr SwsConvertor::process(const fh::FramePtr& frame)
 
     m_outputFormat = outputFormat;
     return output;
-}
-
-AVPixelFormat SwsConvertor::targetFormat() const
-{
-    return m_outputFormat == AV_PIX_FMT_NONE ? m_targetFormat : m_outputFormat;
 }
 }

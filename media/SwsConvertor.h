@@ -18,8 +18,6 @@ public:
 
     fh::FramePtr process(const fh::FramePtr& frame) override;
 
-    AVPixelFormat targetFormat() const;
-
 private:
     AVPixelFormat m_targetFormat{AV_PIX_FMT_NONE};
     int m_targetWidth{0};
