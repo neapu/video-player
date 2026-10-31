@@ -71,4 +71,9 @@ fh::FramePtr SwsConvertor::process(const fh::FramePtr& frame)
     m_outputFormat = outputFormat;
     return output;
 }
+
+AVPixelFormat SwsConvertor::targetFormat() const
+{
+    return m_outputFormat == AV_PIX_FMT_NONE ? m_targetFormat : m_outputFormat;
+}
 }
