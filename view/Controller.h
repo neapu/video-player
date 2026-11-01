@@ -39,16 +39,20 @@ private:
     // 获取当前时刻的媒体时间
     int64_t currentMediaUs(QMutexLocker<QMutex>& locker);
 
+    void endOfStream();
+
 private:
     State m_state{State::Stopped};
-    mutable QMutex m_stateMutex;
+    // mutable QMutex m_stateMutex;
 
     VideoSink* m_videoSink{nullptr};
 
     std::unique_ptr<media::IMediaSource> m_mediaSource{nullptr};
 
     int m_videoStreamIndex{-1};
+    int64_t m_lastVideoPts{0};
     double m_videoFps{0};
+    bool m_videoEnded{false};
     media::MediaFramePtr m_pendingVideoFrame{nullptr};
 
     struct Clock {

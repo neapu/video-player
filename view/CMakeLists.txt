@@ -22,6 +22,7 @@ target_link_libraries(${EXE_NAME} PRIVATE
     Qt6::Widgets
     spdlog
     media
+    gl_video_renderer
 )
 
 if (WIN32)
