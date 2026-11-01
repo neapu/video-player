@@ -174,6 +174,9 @@ view::Frame Controller::nextVideoFrame()
         return YuvFrame{};
     }
 
+    // 一帧的时长，单位微秒，仅用于估算无效pts
+    const int64_t frameIntervalUs = static_cast<int64_t>(1000000 / m_videoFps);
+
     while (true) {
         if (!m_pendingVideoFrame) {
             m_pendingVideoFrame = m_mediaSource->nextFrame(m_videoStreamIndex);
@@ -203,17 +206,8 @@ view::Frame Controller::nextVideoFrame()
 
         int64_t pts = m_pendingVideoFrame->pts();
         if (pts == MIN_INT64) {
-            // 无效的pts，需要根据帧率估算
-            pts = m_lastVideoPts + (1000000 / m_videoFps);
-        }
-        
-        // 根据媒体时间判断是否可以放行/丢帧
-        // 如果帧的pts小于媒体时间超过一帧的间隔，既 (1000000 / m_videoFps)，就需要丢掉
-        constexpr int64_t tolerance = 2000;
-        if (pts + (1000000 / m_videoFps) + tolerance < mediaUs) {
-            m_lastVideoPts = pts;   // 这里要更新一下，不然下一帧会算错
-            m_pendingVideoFrame.reset();
-            continue;
+            // 无效的pts，根据上一帧的pts和帧率估算
+            pts = m_lastVideoPts + frameIntervalUs;
         }
 
         // 如果大于媒体时间，先不渲染，本函数不能阻塞，等待下一次刷新请求
@@ -221,15 +215,45 @@ view::Frame Controller::nextVideoFrame()
             return YuvFrame{};
         }
 
-        // pts <= mediaUs, 可以渲染
+        // 走到这里说明当前帧已到期，是否丢帧只取决于队列中有没有更新的已到期帧：
+        // 有，当前帧已被取代，丢弃，让位于更新的帧；
+        // 没有，即使当前帧已经迟到也照常渲染，不再按帧率估算的间隔判断迟到。
+        auto due = std::move(m_pendingVideoFrame);
+        auto next = m_mediaSource->nextFrame(m_videoStreamIndex);
+        bool superseded = false;
+        if (!next) {
+            // 严重错误，mediaSource不应返回空指针，当作没有更新的帧处理
+            qCritical() << "Got null video frame";
+        } else if (next->type() == media::FrameType::Empty) {
+            // 队列中暂时没有更新的帧，Empty不保留
+        } else {
+            if (next->type() == media::FrameType::Normal) {
+                int64_t nextPts = next->pts();
+                if (nextPts == MIN_INT64) {
+                    // 无效的pts，按当前帧的pts加一帧间隔估算
+                    nextPts = pts + frameIntervalUs;
+                }
+                if (nextPts <= mediaUs) {
+                    // 更新的帧也已到期，当前帧没必要再上屏
+                    superseded = true;
+                }
+            }
+            // Normal和End都留作下一次刷新的候选帧，End会在下一次刷新时走上面的结束流程
+            m_pendingVideoFrame = std::move(next);
+        }
+
+        if (superseded) {
+            m_lastVideoPts = pts;   // 丢弃也要更新，不然下一帧会算错
+            continue;
+        }
+
+        // 当前帧是队列中最新的已到期帧，上屏
         m_lastVideoPts = pts;   // 上屏或丢弃时才更新，不然下一次请求的是同一帧，可能导致错误累计
         {
             QMutexLocker locker(&m_clock.mutex);
             reanchorClock(mediaUs, locker);
         }
-        auto frame = mediaFrameToViewFrame(m_pendingVideoFrame);
-        m_pendingVideoFrame.reset();
-        return frame;
+        return mediaFrameToViewFrame(due);
     }
 
     return YuvFrame{};
