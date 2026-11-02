@@ -12,9 +12,11 @@ qt_add_executable(${EXE_NAME}
     Controller.cpp
     LogManager.h
     LogManager.cpp
+    VideoSink.h
 )
 
-add_subdirectory(gl_video_renderer)
+# add_subdirectory(gl_video_renderer)
+add_subdirectory(rhi_video_renderer)
 add_subdirectory(audio_renderer)
 
 target_link_libraries(${EXE_NAME} PRIVATE
@@ -22,7 +24,8 @@ target_link_libraries(${EXE_NAME} PRIVATE
     Qt6::Widgets
     spdlog
     media
-    gl_video_renderer
+    # gl_video_renderer
+    rhi_video_renderer
 )
 
 if (WIN32)

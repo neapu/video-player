@@ -1,6 +1,7 @@
 #pragma once
 #include <QMainWindow>
-#include "gl_video_renderer/GLVideoRenderer.h"
+#include "rhi_video_renderer/QRhiVideoRenderer.h"
+#include "Controller.h"
 
 namespace view {
 
@@ -13,6 +14,9 @@ public:
     void openFile(const QString &filePath);
 
 private:
-    GLVideoRenderer* m_videoRenderer{nullptr};
+    QRhiVideoRenderer* m_videoRenderer{nullptr};
+
+    Controller* m_controller{nullptr};
+    
 };
 } // namespace view

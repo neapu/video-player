@@ -32,6 +32,7 @@ public:
     State state() const;
 
 private:
+    // 不阻塞，不渲染时返回nullptr，不会返回控制帧
     view::Frame nextVideoFrame();
 
     // 根据媒体时间重锚时钟

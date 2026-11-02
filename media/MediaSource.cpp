@@ -130,6 +130,8 @@ std::expected<PixelFormat, StreamError> MediaSource::enableVideoStream(
     }
     auto* stream = *streamExp;
 
+    LOG_INFO(m_logger, "Got stream. index: {}, codec: {}", streamIndex, avcodec_get_name(stream->codecpar->codec_id));
+
     auto decoder = createVideoDecoder(stream, hardwareAccelerated, hardwareContext);
     if (!decoder) {
         LOG_ERROR(m_logger, "Failed to create decoder for video stream");
@@ -305,6 +307,8 @@ CreateError MediaSource::initialize()
         return CreateError::InvalidArgument;
     }
 
+    LOG_INFO(m_logger, "Initializing MediaSource. Source: {}", m_source);
+
     m_demuxer = Demuxer::create({
         m_source,
         m_logger
@@ -447,9 +451,10 @@ std::optional<MediaSource::VideoDecoderTestResult> MediaSource::testVideoDecoder
     const std::vector<PixelFormat>& requirePixelFormats
 )
 {
+    FUNC_TRACE(m_logger, LogLevel::info);
     VideoDecoderTestResult result{PixelFormat::None, nullptr};
     bool testSuccess{false};
-    for (int i = 0; i < 30; ++i) {
+    for (int i = 0; i < 300; ++i) {
         auto packetExp = m_demuxer->readPacket();
         if (!packetExp) {
             int err = packetExp.error();
@@ -466,11 +471,13 @@ std::optional<MediaSource::VideoDecoderTestResult> MediaSource::testVideoDecoder
             break;
         }
         bool receiveError{false};
+        LOG_DEBUG(m_logger, "Sending packet.");
         while (true) {
             auto frameExp = decoder.receiveFrame();
             if (!frameExp) {
                 int err = frameExp.error();
                 if (err == AVERROR(EAGAIN) || err == AVERROR_EOF) {
+                    LOG_INFO(m_logger, "Need more packets.");
                     break;
                 }
                 LOG_ERROR(m_logger, "Failed to receive frame from decoder. Error: {}", fh::err2str(err));
@@ -482,7 +489,10 @@ std::optional<MediaSource::VideoDecoderTestResult> MediaSource::testVideoDecoder
             auto frameFmt = MediaFrame::toPixelFormat(static_cast<AVPixelFormat>(frame->format));
             if (decoder.type() == Decoder::Type::Software && std::find(requirePixelFormats.begin(), requirePixelFormats.end(), frameFmt) == requirePixelFormats.end()) {
                 auto swsOpt = createSwsConvertor(frame, MediaFrame::toAvPixelFormat(requirePixelFormats[0]));
-                if (!swsOpt) break;
+                if (!swsOpt) {
+                    LOG_ERROR(m_logger, "Failed to create sws convertor.");
+                    break;
+                }
                 result.convertor = *swsOpt;
                 if (result.convertor) {
                     result.pixelFormat = MediaFrame::toPixelFormat(result.convertor->targetFormat());
@@ -495,6 +505,7 @@ std::optional<MediaSource::VideoDecoderTestResult> MediaSource::testVideoDecoder
             break;
         }
         if (receiveError) {
+            LOG_ERROR(m_logger, "Receive error.");
             break;
         }
     }
@@ -514,7 +525,7 @@ std::optional<MediaSource::AudioDecoderTestResult> MediaSource::testAudioDecoder
 {
     AudioDecoderTestResult result{SampleFormat::None, nullptr};
     bool testSuccess{false};
-    for (int i = 0; i < 30; ++i) {
+    for (int i = 0; i < 300; ++i) {
         auto packetExp = m_demuxer->readPacket();
         if (!packetExp) {
             int err = packetExp.error();

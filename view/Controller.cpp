@@ -11,24 +11,6 @@ int64_t steadyClockUs()
     return duration_cast<microseconds>(steady_clock::now().time_since_epoch()).count();
 }
 
-view::YuvFrame mediaFrameToViewFrame(const media::MediaFramePtr& frame)
-{
-    view::YuvFrame f{};
-    auto frameFormat = frame->format();
-    if (frameFormat.pixelFormat != media::PixelFormat::Yuv420p) {
-        return f;
-    }
-    f.width = frameFormat.width;
-    f.height = frameFormat.height;
-    f.yStride = frame->lineSize(0);
-    f.uStride = frame->lineSize(1);
-    f.vStride = frame->lineSize(2);
-    f.y = QByteArray(reinterpret_cast<const char*>(frame->data(0)), f.yStride * f.height);
-    f.u = QByteArray(reinterpret_cast<const char*>(frame->data(1)), f.uStride * f.height / 2);
-    f.v = QByteArray(reinterpret_cast<const char*>(frame->data(2)), f.vStride * f.height / 2);
-    return f;
-}
-
 }
 
 namespace view {
@@ -171,7 +153,7 @@ Controller::State Controller::state() const
 view::Frame Controller::nextVideoFrame()
 {
     if (m_videoStreamIndex == -1) {
-        return YuvFrame{};
+        return nullptr;
     }
 
     // 一帧的时长，单位微秒，仅用于估算无效pts
@@ -185,17 +167,17 @@ view::Frame Controller::nextVideoFrame()
         if (!m_pendingVideoFrame) {
             // 严重错误，mediaSource不应返回空指针
             qCritical() << "Got null video frame";
-            return YuvFrame{};
+            return nullptr;
         }
 
         if (m_pendingVideoFrame->type() == media::FrameType::Empty) {
             m_pendingVideoFrame.reset();
-            return YuvFrame{};
+            return nullptr;
         } else if (m_pendingVideoFrame->type() == media::FrameType::End) {
             m_videoEnded = true;
             QMetaObject::invokeMethod(this, [this]{ endOfStream(); }, Qt::QueuedConnection);
             m_pendingVideoFrame.reset();
-            return YuvFrame{};
+            return nullptr;
         }
 
         int64_t mediaUs{0};
@@ -212,7 +194,7 @@ view::Frame Controller::nextVideoFrame()
 
         // 如果大于媒体时间，先不渲染，本函数不能阻塞，等待下一次刷新请求
         if (pts > mediaUs) {
-            return YuvFrame{};
+            return nullptr;
         }
 
         // 走到这里说明当前帧已到期，是否丢帧只取决于队列中有没有更新的已到期帧：
@@ -253,10 +235,10 @@ view::Frame Controller::nextVideoFrame()
             QMutexLocker locker(&m_clock.mutex);
             reanchorClock(mediaUs, locker);
         }
-        return mediaFrameToViewFrame(due);
+        return std::move(due);
     }
 
-    return YuvFrame{};
+    return nullptr;
 }
 
 void Controller::reanchorClock(int64_t mediaUs, QMutexLocker<QMutex>& locker)
