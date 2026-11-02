@@ -92,6 +92,16 @@ bool Decoder::openCodec()
     return true;
 }
 
+int Decoder::threadCount() const
+{
+    return m_codecContext ? m_codecContext->thread_count : 1;
+}
+
+int Decoder::hasBFrames() const
+{
+    return m_codecContext ? m_codecContext->has_b_frames : 0;
+}
+
 int Decoder::sendPacket(fh::PacketPtr&& packet)
 {
     if (!m_codecContext) {

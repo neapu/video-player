@@ -37,6 +37,10 @@ public:
 
     virtual Type type() const { return m_type; }
 
+    // avcodec_open2 之后 thread_count 是 FFmpeg 解析出的实际线程数（0/自动时非 0）
+    int threadCount() const;
+    int hasBFrames() const;
+
     virtual int sendPacket(fh::PacketPtr&& packet);
     virtual std::expected<fh::FramePtr, int> receiveFrame();
 
