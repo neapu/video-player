@@ -312,6 +312,9 @@ void MediaSource::stop()
     if (m_demuxThread.joinable()) {
         m_demuxThread.join();
     }
+    // cancel 只是为了打断 demux 线程的阻塞读，线程 join 后使命即完成；
+    // 恢复 demuxer 的可用状态，否则 stop 后再 enable 时探测读包会直接 AVERROR_EXIT
+    m_packetCache->resume();
 }
 
 MediaSource::MediaSource(const Options& options)
