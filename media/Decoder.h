@@ -41,7 +41,10 @@ public:
     int threadCount() const;
     int hasBFrames() const;
 
-    virtual int sendPacket(fh::PacketPtr&& packet);
+    // 按借用语义送包：avcodec_send_packet 内部只对包缓冲区取引用（av_read_frame
+    // 出来的包均为引用计数），调用后包仍归调用方所有，因此调用方可以把包同时
+    // 保留在自己的缓存里。传 nullptr 可触发排空(drain)模式。
+    virtual int sendPacket(const fh::PacketPtr& packet);
     virtual std::expected<fh::FramePtr, int> receiveFrame();
 
     virtual void flush();

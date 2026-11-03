@@ -34,10 +34,10 @@ std::expected<std::unique_ptr<IMediaSource>, CreateError> MediaSource::create(co
 
 std::vector<StreamInfo> MediaSource::streamsInfo() const
 {
-    int count = m_demuxer->streamCount();
+    int count = m_packetCache->demuxer().streamCount();
     std::vector<StreamInfo> infos;
     for (int i = 0; i < count; ++i) {
-        const AVStream* stream = m_demuxer->stream(i);
+        const AVStream* stream = m_packetCache->demuxer().stream(i);
         StreamInfo info{};
         info.index = i;
         if (stream->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
@@ -75,7 +75,7 @@ std::expected<PixelFormat, StreamError> MediaSource::enableVideoStream(
         return std::unexpected(StreamError::StreamAlreadyEnabled);
     }
 
-    if (streamIndex < 0 || streamIndex >= m_demuxer->streamCount()) {
+    if (streamIndex < 0 || streamIndex >= m_packetCache->demuxer().streamCount()) {
         return std::unexpected(StreamError::InvalidIndex);
     }
 
@@ -83,7 +83,7 @@ std::expected<PixelFormat, StreamError> MediaSource::enableVideoStream(
         return std::unexpected(StreamError::RequestFormatEmpty);
     }
 
-    AVStream* stream = m_demuxer->stream(streamIndex);
+    const AVStream* stream = m_packetCache->demuxer().stream(streamIndex);
     if (!stream) {
         return std::unexpected(StreamError::InvalidIndex);
     }
@@ -100,7 +100,7 @@ std::expected<PixelFormat, StreamError> MediaSource::enableVideoStream(
         return std::unexpected(StreamError::DecoderCreationFailed);
     }
 
-    DecodeProbe probe(m_demuxer, decoder, streamIndex, m_logger);
+    DecodeProbe probe(*m_packetCache, decoder, streamIndex, m_logger);
     auto frame = probe.testDecode();
     if (!frame) {
         LOG_ERROR(m_logger, "Failed to test decode");
@@ -146,7 +146,7 @@ std::expected<SampleFormat, StreamError> MediaSource::enableAudioStream(int stre
         return std::unexpected(StreamError::StreamAlreadyEnabled);
     }
 
-    if (streamIndex < 0 || streamIndex >= m_demuxer->streamCount()) {
+    if (streamIndex < 0 || streamIndex >= m_packetCache->demuxer().streamCount()) {
         return std::unexpected(StreamError::InvalidIndex);
     }
 
@@ -154,7 +154,7 @@ std::expected<SampleFormat, StreamError> MediaSource::enableAudioStream(int stre
         return std::unexpected(StreamError::RequestFormatEmpty);
     }
 
-    AVStream* stream = m_demuxer->stream(streamIndex);
+    const AVStream* stream = m_packetCache->demuxer().stream(streamIndex);
     if (!stream) {
         return std::unexpected(StreamError::InvalidIndex);
     }
@@ -171,7 +171,7 @@ std::expected<SampleFormat, StreamError> MediaSource::enableAudioStream(int stre
         return std::unexpected(StreamError::DecoderCreationFailed);
     }
 
-    DecodeProbe probe(m_demuxer, decoder, streamIndex, m_logger);
+    DecodeProbe probe(*m_packetCache, decoder, streamIndex, m_logger);
     auto frame = probe.testDecode();
     if (!frame) {
         LOG_ERROR(m_logger, "Failed to test decode");
@@ -242,14 +242,14 @@ MediaFramePtr MediaSource::nextFrame(int streamIndex)
 
 int64_t MediaSource::duration() const
 {
-    return m_demuxer ? m_demuxer->duration() : 0;
+    return m_packetCache ? m_packetCache->demuxer().duration() : 0;
 }
 
 void MediaSource::seek(int64_t timestamp)
 {
     m_seekTarget = timestamp;
     if (m_demuxRunning.load()) {
-        m_demuxer->interrupt();
+        m_packetCache->interrupt();
     }
     std::lock_guard<std::mutex> lock(m_stateMutex);
     for (auto& decodeWorker: m_decodeWorkers) {
@@ -270,7 +270,7 @@ StartError MediaSource::start()
         return StartError::NoStreamEnabled;
     }
 
-    m_demuxer->resume();
+    m_packetCache->resume();
     m_demuxRunning.store(true);
     m_demuxThread = std::thread(&MediaSource::demuxWorkerFunc, this);
 
@@ -285,7 +285,7 @@ void MediaSource::stop()
         return;
     }
     m_demuxRunning.store(false);
-    m_demuxer->cancel();
+    m_packetCache->cancel();
     for (auto& decodeWorker: m_decodeWorkers) {
         decodeWorker.second->interrupt();
     }
@@ -330,24 +330,26 @@ CreateError MediaSource::initialize()
 
     LOG_INFO(m_logger, "Initializing MediaSource. Source: {}", m_source);
 
-    m_demuxer = Demuxer::create({
+    auto demuxer = Demuxer::create({
         m_source,
         m_logger
     });
-    if (!m_demuxer) {
+    if (!demuxer) {
         LOG_ERROR(m_logger, "Failed to create demuxer");
         return CreateError::FileOpenFailed;
     }
+    // Demuxer 的所有权交给 PacketCache，读取包与 seek 都经过缓存层
+    m_packetCache = std::make_unique<PacketCache>(std::move(demuxer), m_logger);
 
     // 至少要有一个视频流或音频流
-    int streamCount = m_demuxer->streamCount();
+    int streamCount = m_packetCache->demuxer().streamCount();
     if (streamCount == 0) {
         LOG_ERROR(m_logger, "No valid stream found");
         return CreateError::NoValidStream;
     }
     bool hasVideoOrAudio = false;
     for (int i = 0; i < streamCount; ++i) {
-        const AVStream* stream = m_demuxer->stream(i);
+        const AVStream* stream = m_packetCache->demuxer().stream(i);
         if (stream->codecpar->codec_type == AVMEDIA_TYPE_VIDEO || stream->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
             hasVideoOrAudio = true;
             break;
@@ -377,8 +379,8 @@ void MediaSource::demuxWorkerFunc()
             if (!m_demuxRunning.load()) {
                 break;
             }
-            m_demuxer->resetInterrupt();
-            int ret = m_demuxer->seek(seekTarget);
+            m_packetCache->resetInterrupt();
+            int ret = m_packetCache->seek(seekTarget);
             if (ret < 0) {
                 if (ret == AVERROR_EXIT && !m_demuxRunning.load()) {
                     break;
@@ -392,6 +394,7 @@ void MediaSource::demuxWorkerFunc()
             }
             retryCount = 0;
             end = false;
+            // seek 已由 PacketCache 代理，成功时缓存随之清空
             // 插入 Flash 包提醒解码线程
             for (auto& worker: m_decodeWorkers) {
                 worker.second->pushPacket(MediaPacket{PacketType::Flush, nullptr});
@@ -404,7 +407,7 @@ void MediaSource::demuxWorkerFunc()
             continue;
         }
 
-        auto packetExp = m_demuxer->readPacket();
+        auto packetExp = m_packetCache->readPacket();
         if (!packetExp.has_value()) {
             int err = packetExp.error();
             if (err == AVERROR_EXIT) {
@@ -447,7 +450,7 @@ void MediaSource::demuxWorkerFunc()
     }
 }
 
-std::unique_ptr<Decoder> MediaSource::createDecoder(AVStream* stream, bool hwaccel, void* hwctx)
+std::unique_ptr<Decoder> MediaSource::createDecoder(const AVStream* stream, bool hwaccel, void* hwctx)
 {
     Decoder::Options opts{};
     if (stream->codecpar->codec_type == AVMEDIA_TYPE_VIDEO && hwaccel) {
@@ -465,7 +468,7 @@ std::unique_ptr<Decoder> MediaSource::createDecoder(AVStream* stream, bool hwacc
     return Decoder::create(opts);
 }
 
-std::unique_ptr<DecodeWorker> MediaSource::createVideoDecodeWorker(AVStream* stream, std::unique_ptr<Decoder>&& decoder, FrameProcessorPtr processor)
+std::unique_ptr<DecodeWorker> MediaSource::createVideoDecodeWorker(const AVStream* stream, std::unique_ptr<Decoder>&& decoder, FrameProcessorPtr processor)
 {
     // 估算包队列长度
     // 目标是视频缓存10秒，音频缓存3秒
@@ -483,7 +486,7 @@ std::unique_ptr<DecodeWorker> MediaSource::createVideoDecodeWorker(AVStream* str
     decodeWorkerOpts.logger = m_logger;
     return DecodeWorker::create(decodeWorkerOpts, std::move(decoder));
 }
-std::unique_ptr<DecodeWorker> MediaSource::createAudioDecodeWorker(AVStream* stream, std::unique_ptr<Decoder>&& decoder, FrameProcessorPtr processor)
+std::unique_ptr<DecodeWorker> MediaSource::createAudioDecodeWorker(const AVStream* stream, std::unique_ptr<Decoder>&& decoder, FrameProcessorPtr processor)
 {
     // 估算包队列长度
     // 目标是视频缓存10秒，音频缓存3秒

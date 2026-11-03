@@ -144,7 +144,7 @@ void DecodeWorker::workerThreadFunc()
             continue;
         }
 
-        int ret = m_decoder->sendPacket(std::move(fhPacket));
+        int ret = m_decoder->sendPacket(fhPacket);
         if (ret < 0) {
             LOG_ERROR(m_logger, "Failed to send packet to decoder, ret: {}", ret);
             continue;

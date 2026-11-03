@@ -19,6 +19,8 @@ set(SRC_FILES
     MediaFrame.cpp
     Demuxer.h
     Demuxer.cpp
+    PacketCache.h
+    PacketCache.cpp
     FrameProcessor.h
     FrameProcessor.cpp
     SwsConvertor.h

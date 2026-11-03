@@ -102,7 +102,7 @@ int Decoder::hasBFrames() const
     return m_codecContext ? m_codecContext->has_b_frames : 0;
 }
 
-int Decoder::sendPacket(fh::PacketPtr&& packet)
+int Decoder::sendPacket(const fh::PacketPtr& packet)
 {
     if (!m_codecContext) {
         LOG_ERROR(m_logger, "Codec context is not initialized");

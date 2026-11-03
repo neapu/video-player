@@ -2,7 +2,7 @@
 #include <thread>
 #include <mutex>
 #include "media/IMediaSource.h"
-#include "Demuxer.h"
+#include "PacketCache.h"
 #include <unordered_map>
 #include "DecodeWorker.h"
 #include "SwsConvertor.h"
@@ -40,9 +40,9 @@ private:
     MediaSource(const Options& options);
     CreateError initialize();
 
-    std::unique_ptr<Decoder> createDecoder(AVStream* stream, bool hwaccel = false, void* hwctx = nullptr);
-    DecodeWorkerPtr createVideoDecodeWorker(AVStream* stream, std::unique_ptr<Decoder>&& decoder, FrameProcessorPtr processor);
-    DecodeWorkerPtr createAudioDecodeWorker(AVStream* stream, std::unique_ptr<Decoder>&& decoder, FrameProcessorPtr processor);
+    std::unique_ptr<Decoder> createDecoder(const AVStream* stream, bool hwaccel = false, void* hwctx = nullptr);
+    DecodeWorkerPtr createVideoDecodeWorker(const AVStream* stream, std::unique_ptr<Decoder>&& decoder, FrameProcessorPtr processor);
+    DecodeWorkerPtr createAudioDecodeWorker(const AVStream* stream, std::unique_ptr<Decoder>&& decoder, FrameProcessorPtr processor);
 
     void demuxWorkerFunc();
 private:
@@ -53,7 +53,9 @@ private:
     std::function<void(RunningError)> m_onRunningError;
 
     LoggerPtr m_logger;
-    std::unique_ptr<Demuxer> m_demuxer;
+    // 套在 Demuxer 上的包缓存层，持有 Demuxer 的所有权：
+    // 探测阶段读到的包缓存于此，demux 线程读包与 seek 均经过此层
+    std::unique_ptr<PacketCache> m_packetCache;
     
     std::atomic_bool m_demuxRunning{false};
     std::thread m_demuxThread;
