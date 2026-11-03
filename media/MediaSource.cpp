@@ -14,9 +14,8 @@ std::expected<std::unique_ptr<IMediaSource>, CreateError> IMediaSource::create(c
 
 MediaSource::~MediaSource()
 {
+    // stop() 已做全量复位(停线程、移除所有流)
     stop();
-    // 释放所有解码器
-    m_decodeWorkers.clear();
     if (m_logger) {
         spdlog::drop(m_instanceName);
     }
@@ -300,21 +299,23 @@ void MediaSource::stop()
 {
     // 必须持锁 join：保证 demux 线程存活期间没有其他线程能拿到锁去写 m_decodeWorkers
     std::lock_guard<std::mutex> lock(m_stateMutex);
-    if (!m_demuxRunning.load()) {
-        return;
+    if (m_demuxRunning.load()) {
+        m_demuxRunning.store(false);
+        m_packetCache->cancel();
+        if (m_demuxThread.joinable()) {
+            m_demuxThread.join();
+        }
+        // cancel 只是为了打断 demux 线程的阻塞读，线程 join 后使命即完成；
+        // 恢复 demuxer 的可用状态，否则下面的 seek(0) 与 stop 后再 enable 时的探测读包会直接 AVERROR_EXIT
+        m_packetCache->resume();
     }
-    m_demuxRunning.store(false);
-    m_packetCache->cancel();
-    for (auto& decodeWorker: m_decodeWorkers) {
-        decodeWorker.second->interrupt();
+    // 全量复位：移除所有已启用的流(解码线程与队列随 worker 销毁)，demuxer 回到文件开头，
+    // 未完成的 seek 请求一并作废。stop() 幂等，未运行时调用同样执行复位
+    m_seekTarget.store(AV_NOPTS_VALUE);
+    m_decodeWorkers.clear();
+    if (m_packetCache->seek(0) < 0) {
+        LOG_ERROR(m_logger, "Failed to seek to beginning on stop, demuxer position is not reset");
     }
-
-    if (m_demuxThread.joinable()) {
-        m_demuxThread.join();
-    }
-    // cancel 只是为了打断 demux 线程的阻塞读，线程 join 后使命即完成；
-    // 恢复 demuxer 的可用状态，否则 stop 后再 enable 时探测读包会直接 AVERROR_EXIT
-    m_packetCache->resume();
 }
 
 MediaSource::MediaSource(const Options& options)

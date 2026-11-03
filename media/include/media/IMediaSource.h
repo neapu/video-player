@@ -91,6 +91,8 @@ public:
      * @param streamIndex 媒体流索引。
      * @return StreamError 操作结果。
      * @note 只能在停止状态下操作流。
+     * @note 当前版本 stop() 会移除所有已启用的流，因此本接口实际使用场景有限；
+     *       接口保留是为后续版本支持运行过程中操作流做准备。
      * @note 线程安全，可与其他接口从不同线程并发调用。
      */
     virtual StreamError disableStream(int streamIndex) = 0;
@@ -123,8 +125,11 @@ public:
     virtual StartError start() = 0;
 
     /**
-     * @brief 停止读取并解码媒体数据。
-     * @note 已经进入队列的帧仍然可以读取，不会停止解码线程，只是不再读取新的媒体数据。
+     * @brief 停止读取并解码媒体数据，并将媒体源复位到刚创建时的状态。
+     * @note 复位包括：停止读取线程、移除所有已启用的流(解码线程与解码队列随之销毁)、
+     *       清空包缓存、demuxer 位置回到文件开头。
+     * @note 复位后 nextFrame 只会返回 Empty 帧；如需再次播放，必须重新 enable 流并 start。
+     * @note 尚未完成的 seek 请求会被作废。
      * @note 线程安全，可与其他接口从不同线程并发调用。
      */
     virtual void stop() = 0;
