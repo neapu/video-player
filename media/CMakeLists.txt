@@ -3,6 +3,8 @@ set(LIB_NAME media)
 set(SRC_FILES 
     include/media/IMediaFrame.h
     include/media/IMediaSource.h
+    include/media/MediaError.h
+    MediaError.cpp
     Logger.h
     Logger.cpp
     MediaSource.h
@@ -23,10 +25,15 @@ set(SRC_FILES
     SwsConvertor.cpp
     SwrConvertor.h
     SwrConvertor.cpp
+    DecodeProbe.h
+    DecodeProbe.cpp
 )
 
 if (WIN32)
-    list(APPEND SRC_FILES D3d11vaDecoder.h D3d11vaDecoder.cpp)
+    list(APPEND SRC_FILES 
+        D3d11vaDecoder.h
+        D3d11vaDecoder.cpp
+    )
 endif()
 
 add_library(${LIB_NAME} STATIC ${SRC_FILES})

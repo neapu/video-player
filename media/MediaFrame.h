@@ -30,6 +30,7 @@ public:
     int64_t pts() const override;
 
     fh::FramePtr releaseFrame();
+    const fh::FramePtr& frame() const { return m_frame; }
 
 protected:
     FrameType m_type{FrameType::Empty};

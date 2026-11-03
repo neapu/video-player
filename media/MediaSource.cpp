@@ -4,67 +4,9 @@
 #include <algorithm>
 #include "SwsConvertor.h"
 #include "SwrConvertor.h"
+#include "DecodeProbe.h"
 
 namespace media {
-std::string errToString(CreateError err)
-{
-    switch (err) {
-        case CreateError::None: return "None";
-        case CreateError::FileOpenFailed: return "Failed to open file";
-        case CreateError::NoValidStream: return "No valid stream";
-        case CreateError::InvalidArgument: return "Invalid argument";
-        case CreateError::LoggerCreationFailed: return "Logger creation failed";
-        case CreateError::LoggerNameAlreadyExists: return "Logger name exists";
-        default: return "Unknown";
-    }
-}
-std::string errToString(RunningError err)
-{
-    switch (err) {
-        case RunningError::None: return "None";
-        case RunningError::ReadFailed: return "Read failed";
-        default: return "Unknown";
-    }
-}
-std::string errToString(StreamError err)
-{
-    switch (err) {
-        case StreamError::None: return "None";
-        case StreamError::InvalidIndex: return "Invalid Stream index";
-        case StreamError::DemuxerRunning: return "Demuxer running, can't operate stream";
-        case StreamError::StreamAlreadyEnabled: return "Stream already enabled";
-        case StreamError::StreamNotEnabled: return "Stream not enabled";
-        case StreamError::DecoderCreationFailed: return "Decoder creation failed";
-        case StreamError::StreamTypeMismatch: return "Stream type mismatch";
-        case StreamError::RequestFormatEmpty: return "Request format empty";
-        default: return "Unknown";
-    }
-}
-std::string errToString(SeekError err)
-{
-    switch (err) {
-        case SeekError::None: return "None";
-        case SeekError::NotSupported: return "Not supported";
-        default: return "Unknown";
-    }
-}
-std::string errToString(StartError err)
-{
-    switch (err) {
-        case StartError::None: return "None";
-        case StartError::AlreadyStarted: return "Already started";
-        case StartError::NoStreamEnabled: return "No stream enabled";
-        default: return "Unknown";
-    }
-}
-std::string errToString(ProcessError err)
-{
-    switch (err) {
-        case ProcessError::None: return "None";
-        default: return "Unknown";
-    }
-}
-
 std::expected<std::unique_ptr<IMediaSource>, CreateError> IMediaSource::create(const Options& options)
 {
     return MediaSource::create(options);
@@ -125,65 +67,143 @@ std::expected<PixelFormat, StreamError> MediaSource::enableVideoStream(
 )
 {
     std::lock_guard<std::mutex> lock(m_stateMutex);
-    auto streamExp = validateVideoStream(streamIndex, requirePixelFormats);
-    if (!streamExp) {
-        return std::unexpected(streamExp.error());
+    if (m_demuxRunning) {
+        return std::unexpected(StreamError::DemuxerRunning);
     }
-    auto* stream = *streamExp;
 
-    LOG_INFO(m_logger, "Got stream. index: {}, codec: {}", streamIndex, avcodec_get_name(stream->codecpar->codec_id));
+    if (m_decodeWorkers.contains(streamIndex)) {
+        return std::unexpected(StreamError::StreamAlreadyEnabled);
+    }
 
-    auto decoder = createVideoDecoder(stream, hardwareAccelerated, hardwareContext);
+    if (streamIndex < 0 || streamIndex >= m_demuxer->streamCount()) {
+        return std::unexpected(StreamError::InvalidIndex);
+    }
+
+    if (requirePixelFormats.empty()) {
+        return std::unexpected(StreamError::RequestFormatEmpty);
+    }
+
+    AVStream* stream = m_demuxer->stream(streamIndex);
+    if (!stream) {
+        return std::unexpected(StreamError::InvalidIndex);
+    }
+
+    if (stream->codecpar->codec_type != AVMEDIA_TYPE_VIDEO) {
+        return std::unexpected(StreamError::InvalidIndex);
+    }
+
+    LOG_INFO(m_logger, "Got stream. Index = {}, codec = {}", streamIndex, avcodec_get_name(stream->codecpar->codec_id));
+
+    auto decoder = createDecoder(stream, hardwareAccelerated, hardwareContext);
     if (!decoder) {
-        LOG_ERROR(m_logger, "Failed to create decoder for video stream");
+        LOG_ERROR(m_logger, "Failed to create decoder");
         return std::unexpected(StreamError::DecoderCreationFailed);
     }
 
-    auto testResult = testVideoDecoder(*decoder, streamIndex, requirePixelFormats);
-    if (!testResult) {
-        LOG_ERROR(m_logger, "Decoder test failed");
+    DecodeProbe probe(m_demuxer, decoder, streamIndex, m_logger);
+    auto frame = probe.testDecode();
+    if (!frame) {
+        LOG_ERROR(m_logger, "Failed to test decode");
         return std::unexpected(StreamError::DecoderCreationFailed);
     }
+    MediaFrame mediaFrame(FrameType::Normal, std::move(frame));
 
-    auto decodeWorker = createVideoDecodeWorker(stream, std::move(decoder), testResult->convertor);
+    PixelFormat retFormat = mediaFrame.format().pixelFormat;
+    // 检查像素格式是否在请求的格式里，如果不在，要创建转换器(硬解码时忽略)
+    std::shared_ptr<SwsConvertor> converter{nullptr};
+    if (!hardwareAccelerated && std::find(requirePixelFormats.begin(), requirePixelFormats.end(), retFormat) == requirePixelFormats.end()) {
+        AVPixelFormat target = MediaFrame::toAvPixelFormat(requirePixelFormats[0]); // 前面已经保证过列表非空
+        SwsConvertor::Options opts{};
+        opts.targetFormat = target;
+        converter = std::make_shared<SwsConvertor>(opts);
+        // 测试一下工作是否正常，就用刚才测试解码时的帧
+        auto retFrame = converter->process(mediaFrame.frame());
+        if (!retFrame) {
+            LOG_ERROR(m_logger, "Failed to convert frame");
+            return std::unexpected(StreamError::DecoderCreationFailed);
+        }
+        retFormat = requirePixelFormats[0];
+    }
+
+    auto decodeWorker = createVideoDecodeWorker(stream, std::move(decoder), converter);
     if (!decodeWorker) {
         LOG_ERROR(m_logger, "Failed to create decode worker");
         return std::unexpected(StreamError::DecoderCreationFailed);
     }
     m_decodeWorkers[streamIndex] = std::move(decodeWorker);
 
-    return testResult->pixelFormat;
+    return retFormat;
 }
 
 std::expected<SampleFormat, StreamError> MediaSource::enableAudioStream(int streamIndex, std::vector<SampleFormat> requireSampleFormats)
 {
     std::lock_guard<std::mutex> lock(m_stateMutex);
-    auto streamExp = validateAudioStream(streamIndex, requireSampleFormats);
-    if (!streamExp) {
-        return std::unexpected(streamExp.error());
+    if (m_demuxRunning) {
+        return std::unexpected(StreamError::DemuxerRunning);
     }
-    auto* stream = *streamExp;
 
-    auto decoder = createAudioDecoder(stream);
+    if (m_decodeWorkers.contains(streamIndex)) {
+        return std::unexpected(StreamError::StreamAlreadyEnabled);
+    }
+
+    if (streamIndex < 0 || streamIndex >= m_demuxer->streamCount()) {
+        return std::unexpected(StreamError::InvalidIndex);
+    }
+
+    if (requireSampleFormats.empty()) {
+        return std::unexpected(StreamError::RequestFormatEmpty);
+    }
+
+    AVStream* stream = m_demuxer->stream(streamIndex);
+    if (!stream) {
+        return std::unexpected(StreamError::InvalidIndex);
+    }
+
+    if (stream->codecpar->codec_type != AVMEDIA_TYPE_AUDIO) {
+        return std::unexpected(StreamError::InvalidIndex);
+    }
+
+    LOG_INFO(m_logger, "Got stream. Index = {}, codec = {}", streamIndex, avcodec_get_name(stream->codecpar->codec_id));
+
+    auto decoder = createDecoder(stream);
     if (!decoder) {
-        LOG_ERROR(m_logger, "Failed to create decoder for audio stream");
+        LOG_ERROR(m_logger, "Failed to create decoder");
         return std::unexpected(StreamError::DecoderCreationFailed);
     }
 
-    auto testResult = testAudioDecoder(*decoder, streamIndex, requireSampleFormats);
-    if (!testResult) {
-        LOG_ERROR(m_logger, "Audio decoder test failed");
+    DecodeProbe probe(m_demuxer, decoder, streamIndex, m_logger);
+    auto frame = probe.testDecode();
+    if (!frame) {
+        LOG_ERROR(m_logger, "Failed to test decode");
         return std::unexpected(StreamError::DecoderCreationFailed);
     }
+    MediaFrame mediaFrame(FrameType::Normal, std::move(frame));
 
-    auto decodeWorker = createAudioDecodeWorker(stream, std::move(decoder), testResult->convertor);
+    SampleFormat retFormat = mediaFrame.format().sampleFormat;
+    // 检查采样格式是否在请求的格式里，如果不在，要创建转换器
+    std::shared_ptr<SwrConvertor> converter{nullptr};
+    if (std::find(requireSampleFormats.begin(), requireSampleFormats.end(), retFormat) == requireSampleFormats.end()) {
+        AVSampleFormat target = MediaFrame::toAvSampleFormat(requireSampleFormats[0]); // 前面已经保证过列表非空
+        SwrConvertor::Options opts{};
+        opts.targetFormat = target;
+        converter = std::make_shared<SwrConvertor>(opts);
+        // 测试一下工作是否正常，就用刚才测试解码时的帧
+        auto retFrame = converter->process(mediaFrame.frame());
+        if (!retFrame) {
+            LOG_ERROR(m_logger, "Failed to convert frame");
+            return std::unexpected(StreamError::DecoderCreationFailed);
+        }
+        retFormat = requireSampleFormats[0];
+    }
+
+    auto decodeWorker = createAudioDecodeWorker(stream, std::move(decoder), converter);
     if (!decodeWorker) {
-        LOG_ERROR(m_logger, "Failed to create audio decode worker");
+        LOG_ERROR(m_logger, "Failed to create decode worker");
         return std::unexpected(StreamError::DecoderCreationFailed);
     }
     m_decodeWorkers[streamIndex] = std::move(decodeWorker);
 
-    return testResult->sampleFormat;
+    return retFormat;
 }
 
 StreamError MediaSource::disableStream(int streamIndex)
@@ -343,431 +363,6 @@ CreateError MediaSource::initialize()
     return CreateError::None;
 }
 
-std::expected<AVStream*, StreamError> MediaSource::validateVideoStream(
-    int streamIndex,
-    const std::vector<PixelFormat>& requirePixelFormats
-) const
-{
-    if (m_demuxRunning) {
-        LOG_ERROR(m_logger, "Cannot enable video stream while demuxer is running");
-        return std::unexpected(StreamError::DemuxerRunning);
-    }
-
-    if (m_decodeWorkers.contains(streamIndex)) {
-        LOG_ERROR(m_logger, "Video stream already enabled");
-        return std::unexpected(StreamError::StreamAlreadyEnabled);
-    }
-
-    if (streamIndex < 0 || streamIndex >= m_demuxer->streamCount()) {
-        LOG_ERROR(m_logger, "Invalid stream index");
-        return std::unexpected(StreamError::InvalidIndex);
-    }
-
-    AVStream* stream = m_demuxer->stream(streamIndex);
-    if (!stream) {
-        LOG_ERROR(m_logger, "Invalid stream index");
-        return std::unexpected(StreamError::InvalidIndex);
-    }
-
-    if (stream->codecpar->codec_type != AVMEDIA_TYPE_VIDEO) {
-        return std::unexpected(StreamError::StreamTypeMismatch);
-    }
-
-    if (requirePixelFormats.empty()) {
-        return std::unexpected(StreamError::RequestFormatEmpty);
-    }
-
-    return stream;
-}
-
-std::expected<AVStream*, StreamError> MediaSource::validateAudioStream(
-    int streamIndex,
-    const std::vector<SampleFormat>& requireSampleFormats
-) const
-{
-    if (m_demuxRunning) {
-        LOG_ERROR(m_logger, "Cannot enable audio stream while demuxer is running");
-        return std::unexpected(StreamError::DemuxerRunning);
-    }
-
-    if (m_decodeWorkers.contains(streamIndex)) {
-        LOG_ERROR(m_logger, "Audio stream already enabled");
-        return std::unexpected(StreamError::StreamAlreadyEnabled);
-    }
-
-    if (streamIndex < 0 || streamIndex >= m_demuxer->streamCount()) {
-        LOG_ERROR(m_logger, "Invalid stream index");
-        return std::unexpected(StreamError::InvalidIndex);
-    }
-
-    AVStream* stream = m_demuxer->stream(streamIndex);
-    if (!stream) {
-        LOG_ERROR(m_logger, "Invalid stream index");
-        return std::unexpected(StreamError::InvalidIndex);
-    }
-
-    if (stream->codecpar->codec_type != AVMEDIA_TYPE_AUDIO) {
-        LOG_ERROR(m_logger, "Stream type mismatch: expected audio");
-        return std::unexpected(StreamError::StreamTypeMismatch);
-    }
-
-    if (requireSampleFormats.empty()) {
-        LOG_ERROR(m_logger, "Requested sample formats are empty");
-        return std::unexpected(StreamError::RequestFormatEmpty);
-    }
-
-    return stream;
-}
-
-std::unique_ptr<Decoder> MediaSource::createVideoDecoder(AVStream* stream, bool hardwareAccelerated, void* hardwareContext)
-{
-    Decoder::Options decoderOptions{};
-    if (hardwareAccelerated) {
-#ifdef _WIN32
-        decoderOptions.type = Decoder::Type::D3d11va;
-        decoderOptions.hardwareContext = hardwareContext;
-#else
-        decoderOptions.type = Decoder::Type::Software;
-#endif
-    } else {
-        decoderOptions.type = Decoder::Type::Software;
-    }
-    decoderOptions.stream = stream;
-    decoderOptions.logger = m_logger;
-    return Decoder::create(decoderOptions);
-}
-
-std::unique_ptr<Decoder> MediaSource::createAudioDecoder(AVStream* stream)
-{
-    Decoder::Options decoderOptions{};
-    decoderOptions.type = Decoder::Type::Software;
-    decoderOptions.stream = stream;
-    decoderOptions.logger = m_logger;
-    return Decoder::create(decoderOptions);
-}
-
-std::optional<MediaSource::VideoDecoderTestResult> MediaSource::testVideoDecoder(
-    Decoder& decoder,
-    int streamIndex,
-    const std::vector<PixelFormat>& requirePixelFormats
-)
-{
-    FUNC_TRACE(m_logger, LogLevel::info);
-    VideoDecoderTestResult result{PixelFormat::None, nullptr};
-
-    // 帧级多线程会引入 thread_count-1 帧的管线延迟，叠加 has_b_frames 的重排延迟，
-    // 解码器出首帧约需 thread_count + has_b_frames 个视频包；margin 覆盖解析器漏报等情况。
-    // 预算只计视频包（其他流的包不消耗）；上限保证异常码流下测试耗时有界，
-    // 正常码流在首帧解出时立即退出循环，不会触顶。
-    const int videoPacketBudget = std::min(decoder.threadCount() + decoder.hasBFrames() + 8, 48);
-    const int demuxPacketCap = videoPacketBudget * 16; // 音视频交错极端稀疏时的总包安全上限
-    LOG_INFO(m_logger, "Testing video decoder. Budget: {} video packets (thread_count: {}, has_b_frames: {})",
-        videoPacketBudget, decoder.threadCount(), decoder.hasBFrames());
-
-    enum class FailReason { None, DemuxError, SendError, ReceiveError, Eof, DemuxCap };
-    FailReason failReason{FailReason::None};
-    bool testSuccess{false};
-    int videoPacketsSent{0};
-    int packetsRead{0};
-
-    // 校验首帧并确定像素格式/转换器，正常接收与 drain 排空两条路径共用
-    auto acceptFrame = [&](const fh::FramePtr& frame) -> bool {
-        // 非硬解码的情况，需要测试转换器，如果目标格式中不包含当前帧格式，需要创建转换器并测试
-        auto frameFmt = MediaFrame::toPixelFormat(static_cast<AVPixelFormat>(frame->format));
-        if (decoder.type() == Decoder::Type::Software && std::find(requirePixelFormats.begin(), requirePixelFormats.end(), frameFmt) == requirePixelFormats.end()) {
-            auto swsOpt = createSwsConvertor(frame, MediaFrame::toAvPixelFormat(requirePixelFormats[0]));
-            if (!swsOpt) {
-                LOG_ERROR(m_logger, "Failed to create sws convertor.");
-                return false;
-            }
-            result.convertor = *swsOpt;
-            if (result.convertor) {
-                result.pixelFormat = MediaFrame::toPixelFormat(result.convertor->targetFormat());
-            }
-        } else {
-            result.pixelFormat = frameFmt;
-        }
-        return true;
-    };
-
-    while (!testSuccess && videoPacketsSent < videoPacketBudget) {
-        if (packetsRead >= demuxPacketCap) {
-            failReason = FailReason::DemuxCap;
-            break;
-        }
-        auto packetExp = m_demuxer->readPacket();
-        if (!packetExp) {
-            int err = packetExp.error();
-            if (err == AVERROR_EOF) {
-                failReason = FailReason::Eof;
-                break;
-            }
-            LOG_ERROR(m_logger, "Failed to read packet from demuxer. Error: {}", fh::err2str(err));
-            failReason = FailReason::DemuxError;
-            break;
-        }
-        ++packetsRead;
-        auto packet = std::move(*packetExp);
-        if (packet->stream_index != streamIndex) {
-            continue;
-        }
-        int ret = decoder.sendPacket(std::move(packet));
-        if (ret < 0) {
-            LOG_ERROR(m_logger, "Failed to send packet to decoder. Error: {}", fh::err2str(ret));
-            failReason = FailReason::SendError;
-            break;
-        }
-        ++videoPacketsSent;
-        LOG_DEBUG(m_logger, "Sent video packet {}/{}.", videoPacketsSent, videoPacketBudget);
-        auto frameExp = decoder.receiveFrame();
-        if (frameExp) {
-            testSuccess = acceptFrame(*frameExp);
-            if (!testSuccess) {
-                failReason = FailReason::ReceiveError;
-            }
-        } else {
-            int err = frameExp.error();
-            if (err != AVERROR(EAGAIN) && err != AVERROR_EOF) {
-                LOG_ERROR(m_logger, "Failed to receive frame from decoder. Error: {}", fh::err2str(err));
-                failReason = FailReason::ReceiveError;
-            } else {
-                LOG_DEBUG(m_logger, "Need more packets.");
-            }
-        }
-    }
-
-    if (!testSuccess
-        && (failReason == FailReason::None || failReason == FailReason::Eof || failReason == FailReason::DemuxCap)) {
-        // 预算耗尽或输入不足时，发空包进入排空模式（同 DecodeWorker::drainDecoder）：
-        // 帧线程管线中滞留的帧会被强制吐出，避免仅因预算不足而误判失败
-        LOG_INFO(m_logger, "No frame after {} video packets ({} packets read). Draining decoder.",
-            videoPacketsSent, packetsRead);
-        int ret = decoder.sendPacket(nullptr);
-        if (ret < 0 && ret != AVERROR(EAGAIN)) {
-            LOG_ERROR(m_logger, "Failed to drain decoder. Error: {}", fh::err2str(ret));
-        } else {
-            auto frameExp = decoder.receiveFrame();
-            if (frameExp) {
-                testSuccess = acceptFrame(*frameExp);
-                if (testSuccess) {
-                    LOG_INFO(m_logger, "Got first frame after drain. Decoder output delay exceeded test budget "
-                        "(thread_count: {}, has_b_frames: {}, budget: {}).",
-                        decoder.threadCount(), decoder.hasBFrames(), videoPacketBudget);
-                }
-            }
-        }
-    }
-
-    m_demuxer->seek(0); // Reset demuxer to the beginning after test decoding
-    if (!testSuccess) {
-        switch (failReason) {
-        case FailReason::Eof:
-            LOG_ERROR(m_logger, "Insufficient input: reached end of file after only {} video packets "
-                "({} packets read in total); decoder never produced a frame even after drain.",
-                videoPacketsSent, packetsRead);
-            break;
-        case FailReason::DemuxCap:
-            LOG_ERROR(m_logger, "Insufficient input: video packets too sparse; read {} packets "
-                "but only {} video packets within demux cap {}.", packetsRead, videoPacketsSent, demuxPacketCap);
-            break;
-        case FailReason::None:
-            LOG_ERROR(m_logger, "Decoder produced no frame after {} video packets and drain "
-                "(thread_count: {}, has_b_frames: {}, budget: {}); stream likely undecodable.",
-                videoPacketsSent, decoder.threadCount(), decoder.hasBFrames(), videoPacketBudget);
-            break;
-        default: // 硬错误（读包/发包/收帧/转换器失败）已在上方记录具体原因
-            LOG_ERROR(m_logger, "Video decoder test failed.");
-            break;
-        }
-        return std::nullopt;
-    }
-    decoder.flush(); // flush 会重置 drain 产生的 EOF 状态，保证解码器随后能被 DecodeWorker 复用
-    return result;
-}
-
-std::optional<MediaSource::AudioDecoderTestResult> MediaSource::testAudioDecoder(
-    Decoder& decoder,
-    int streamIndex,
-    const std::vector<SampleFormat>& requireSampleFormats
-)
-{
-    AudioDecoderTestResult result{SampleFormat::None, nullptr};
-
-    // 音频解码没有重排管线，出首帧通常只需一两个包；小预算 + drain 兜底即可。
-    // 预算只计音频包（其他流的包不消耗）。
-    const int audioPacketBudget = 8;
-    const int demuxPacketCap = audioPacketBudget * 16; // 音视频交错极端稀疏时的总包安全上限
-    LOG_INFO(m_logger, "Testing audio decoder. Budget: {} audio packets.", audioPacketBudget);
-
-    enum class FailReason { None, DemuxError, SendError, ReceiveError, Eof, DemuxCap };
-    FailReason failReason{FailReason::None};
-    bool testSuccess{false};
-    int audioPacketsSent{0};
-    int packetsRead{0};
-
-    // 校验首帧并确定采样格式/转换器，正常接收与 drain 排空两条路径共用
-    auto acceptFrame = [&](const fh::FramePtr& frame) -> bool {
-        const auto frameFormat = MediaFrame::toSampleFormat(static_cast<AVSampleFormat>(frame->format));
-        if (frameFormat != SampleFormat::None &&
-            std::find(requireSampleFormats.begin(), requireSampleFormats.end(), frameFormat) != requireSampleFormats.end()) {
-            result.sampleFormat = frameFormat;
-            return true;
-        }
-        auto targetFormat = std::find_if(requireSampleFormats.begin(), requireSampleFormats.end(), [](SampleFormat format) {
-            return MediaFrame::toAvSampleFormat(format) != AV_SAMPLE_FMT_NONE;
-        });
-        if (targetFormat == requireSampleFormats.end()) {
-            LOG_ERROR(m_logger, "No supported requested audio sample format");
-            return false;
-        }
-
-        SwrConvertor::Options convertorOptions{};
-        convertorOptions.targetFormat = MediaFrame::toAvSampleFormat(*targetFormat);
-        convertorOptions.logger = m_logger;
-        auto convertor = std::make_shared<SwrConvertor>(convertorOptions);
-        if (!convertor->process(frame)) {
-            LOG_ERROR(m_logger, "Failed to convert decoded audio frame to requested sample format");
-            return false;
-        }
-        result.sampleFormat = *targetFormat;
-        result.convertor = std::move(convertor);
-        return true;
-    };
-
-    while (!testSuccess && audioPacketsSent < audioPacketBudget) {
-        if (packetsRead >= demuxPacketCap) {
-            failReason = FailReason::DemuxCap;
-            break;
-        }
-        auto packetExp = m_demuxer->readPacket();
-        if (!packetExp) {
-            int err = packetExp.error();
-            if (err == AVERROR_EOF) {
-                failReason = FailReason::Eof;
-                break;
-            }
-            LOG_ERROR(m_logger, "Failed to read packet from demuxer. Error: {}", fh::err2str(err));
-            failReason = FailReason::DemuxError;
-            break;
-        }
-        ++packetsRead;
-        auto packet = std::move(*packetExp);
-        if (packet->stream_index != streamIndex) {
-            continue;
-        }
-        int ret = decoder.sendPacket(std::move(packet));
-        if (ret < 0) {
-            LOG_ERROR(m_logger, "Failed to send packet to decoder. Error: {}", fh::err2str(ret));
-            failReason = FailReason::SendError;
-            break;
-        }
-        ++audioPacketsSent;
-        LOG_DEBUG(m_logger, "Sent audio packet {}/{}.", audioPacketsSent, audioPacketBudget);
-        auto frameExp = decoder.receiveFrame();
-        if (frameExp) {
-            testSuccess = acceptFrame(*frameExp);
-            if (!testSuccess) {
-                failReason = FailReason::ReceiveError;
-            }
-        } else {
-            int err = frameExp.error();
-            if (err != AVERROR(EAGAIN) && err != AVERROR_EOF) {
-                LOG_ERROR(m_logger, "Failed to receive frame from decoder. Error: {}", fh::err2str(err));
-                failReason = FailReason::ReceiveError;
-            }
-        }
-    }
-
-    if (!testSuccess
-        && (failReason == FailReason::None || failReason == FailReason::Eof || failReason == FailReason::DemuxCap)) {
-        // 预算耗尽或输入不足时，发空包进入排空模式（同 DecodeWorker::drainDecoder）
-        LOG_INFO(m_logger, "No frame after {} audio packets ({} packets read). Draining decoder.",
-            audioPacketsSent, packetsRead);
-        int ret = decoder.sendPacket(nullptr);
-        if (ret < 0 && ret != AVERROR(EAGAIN)) {
-            LOG_ERROR(m_logger, "Failed to drain decoder. Error: {}", fh::err2str(ret));
-        } else {
-            auto frameExp = decoder.receiveFrame();
-            if (frameExp) {
-                testSuccess = acceptFrame(*frameExp);
-                if (testSuccess) {
-                    LOG_INFO(m_logger, "Got first frame after drain.");
-                }
-            }
-        }
-    }
-
-    m_demuxer->seek(0);
-    if (!testSuccess) {
-        switch (failReason) {
-        case FailReason::Eof:
-            LOG_ERROR(m_logger, "Insufficient input: reached end of file after only {} audio packets "
-                "({} packets read in total); decoder never produced a frame even after drain.",
-                audioPacketsSent, packetsRead);
-            break;
-        case FailReason::DemuxCap:
-            LOG_ERROR(m_logger, "Insufficient input: audio packets too sparse; read {} packets "
-                "but only {} audio packets within demux cap {}.", packetsRead, audioPacketsSent, demuxPacketCap);
-            break;
-        case FailReason::None:
-            LOG_ERROR(m_logger, "Decoder produced no frame after {} audio packets and drain "
-                "(budget: {}); stream likely undecodable.", audioPacketsSent, audioPacketBudget);
-            break;
-        default: // 硬错误（读包/发包/收帧/转换器失败）已在上方记录具体原因
-            LOG_ERROR(m_logger, "Audio decoder test failed.");
-            break;
-        }
-        return std::nullopt;
-    }
-    decoder.flush();
-    return result;
-}
-
-DecodeWorkerPtr MediaSource::createVideoDecodeWorker(
-    AVStream* stream,
-    std::unique_ptr<Decoder>&& decoder,
-    FrameProcessorPtr processor
-)
-{
-    // 根据解码器类型，估算包队列长度
-    // 目标是视频缓存10秒，音频缓存3秒
-    // 由于包不携带时长信息（一包不一定对应一帧），视频根据帧率估算，音频根据采样率估算
-    const auto frameRate = stream->codecpar->framerate;
-    int fps = frameRate.den > 0 ? frameRate.num / frameRate.den : 0;
-    fps = fps > 0 ? fps : 120;  // 留足余量，不差这点内存
-    int packetQueueLength = fps * 10; // 10秒的视频缓存
-    LOG_INFO(m_logger, "Estimated video packet queue length: {}", packetQueueLength);
-
-    DecodeWorker::Options decodeWorkerOpts;
-    decodeWorkerOpts.maxPacketQueueSize = packetQueueLength;
-    decodeWorkerOpts.maxFrameQueueSize = 5;
-    decodeWorkerOpts.processor = std::move(processor);
-    decodeWorkerOpts.logger = m_logger;
-    return DecodeWorker::create(decodeWorkerOpts, std::move(decoder));
-}
-
-DecodeWorkerPtr MediaSource::createAudioDecodeWorker(
-    AVStream* stream,
-    std::unique_ptr<Decoder>&& decoder,
-    FrameProcessorPtr processor
-)
-{
-    const int sampleRate = stream->codecpar->sample_rate;
-    const int frameSize = stream->codecpar->frame_size;
-    const int packetsPerSecond = sampleRate > 0 && frameSize > 0
-        ? (sampleRate + frameSize - 1) / frameSize
-        : 100;
-    const int packetQueueLength = std::max(1, packetsPerSecond * 3);
-    LOG_INFO(m_logger, "Estimated audio packet queue length: {}", packetQueueLength);
-
-    DecodeWorker::Options decodeWorkerOpts;
-    decodeWorkerOpts.maxPacketQueueSize = packetQueueLength;
-    decodeWorkerOpts.maxFrameQueueSize = 30;
-    decodeWorkerOpts.processor = std::move(processor);
-    decodeWorkerOpts.logger = m_logger;
-    return DecodeWorker::create(decodeWorkerOpts, std::move(decoder));
-}
-
 void MediaSource::demuxWorkerFunc()
 {
     // 此函数运行在 m_demuxThread 上，禁止获取 m_stateMutex：
@@ -852,15 +447,60 @@ void MediaSource::demuxWorkerFunc()
     }
 }
 
-std::optional<std::shared_ptr<SwsConvertor>> MediaSource::createSwsConvertor(const fh::FramePtr& frame, AVPixelFormat target)
+std::unique_ptr<Decoder> MediaSource::createDecoder(AVStream* stream, bool hwaccel, void* hwctx)
 {
-    if (!frame) return std::nullopt;
-    SwsConvertor::Options opts{};
-    opts.targetFormat = target;
-    auto sws = std::make_shared<SwsConvertor>(opts);
-    auto retFrame = sws->process(frame);
-    if (!retFrame) return std::nullopt;
-    return sws;
+    Decoder::Options opts{};
+    if (stream->codecpar->codec_type == AVMEDIA_TYPE_VIDEO && hwaccel) {
+#ifdef _WIN32
+        opts.type = Decoder::Type::D3d11va;
+        opts.hardwareContext = hwctx;
+#else
+        opts.type = Decoder::Type::Software;
+#endif
+    } else {
+        opts.type = Decoder::Type::Software;
+    }
+    opts.stream = stream;
+    opts.logger = m_logger;
+    return Decoder::create(opts);
 }
 
+std::unique_ptr<DecodeWorker> MediaSource::createVideoDecodeWorker(AVStream* stream, std::unique_ptr<Decoder>&& decoder, FrameProcessorPtr processor)
+{
+    // 估算包队列长度
+    // 目标是视频缓存10秒，音频缓存3秒
+    // 由于包不携带时长信息（一包不一定对应一帧），视频根据帧率估算，音频根据采样率估算
+    const auto frameRate = stream->codecpar->framerate;
+    int fps = frameRate.den > 0 ? frameRate.num / frameRate.den : 0;
+    fps = fps > 0 ? fps : 120;  // 留足余量，不差这点内存
+    int packetQueueLength = fps * 10; // 10秒的视频缓存
+    LOG_INFO(m_logger, "Estimated video packet queue length: {}", packetQueueLength);
+
+    DecodeWorker::Options decodeWorkerOpts;
+    decodeWorkerOpts.maxPacketQueueSize = packetQueueLength;
+    decodeWorkerOpts.maxFrameQueueSize = 5;
+    decodeWorkerOpts.processor = std::move(processor);
+    decodeWorkerOpts.logger = m_logger;
+    return DecodeWorker::create(decodeWorkerOpts, std::move(decoder));
+}
+std::unique_ptr<DecodeWorker> MediaSource::createAudioDecodeWorker(AVStream* stream, std::unique_ptr<Decoder>&& decoder, FrameProcessorPtr processor)
+{
+    // 估算包队列长度
+    // 目标是视频缓存10秒，音频缓存3秒
+    // 由于包不携带时长信息（一包不一定对应一帧），视频根据帧率估算，音频根据采样率估算
+    const int sampleRate = stream->codecpar->sample_rate;
+    const int frameSize = stream->codecpar->frame_size;
+    const int packetsPerSecond = sampleRate > 0 && frameSize > 0
+        ? (sampleRate + frameSize - 1) / frameSize
+        : 100;
+    const int packetQueueLength = std::max(1, packetsPerSecond * 3);
+    LOG_INFO(m_logger, "Estimated audio packet queue length: {}", packetQueueLength);
+
+    DecodeWorker::Options decodeWorkerOpts;
+    decodeWorkerOpts.maxPacketQueueSize = packetQueueLength;
+    decodeWorkerOpts.maxFrameQueueSize = 30;
+    decodeWorkerOpts.processor = std::move(processor);
+    decodeWorkerOpts.logger = m_logger;
+    return DecodeWorker::create(decodeWorkerOpts, std::move(decoder));
+}
 } // namespace media

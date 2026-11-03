@@ -40,49 +40,11 @@ private:
     MediaSource(const Options& options);
     CreateError initialize();
 
-    struct VideoDecoderTestResult {
-        PixelFormat pixelFormat;
-        std::shared_ptr<SwsConvertor> convertor;
-    };
-    struct AudioDecoderTestResult {
-        SampleFormat sampleFormat;
-        std::shared_ptr<SwrConvertor> convertor;
-    };
-
-    std::expected<AVStream*, StreamError> validateVideoStream(
-        int streamIndex,
-        const std::vector<PixelFormat>& requirePixelFormats
-    ) const;
-    std::expected<AVStream*, StreamError> validateAudioStream(
-        int streamIndex,
-        const std::vector<SampleFormat>& requireSampleFormats
-    ) const;
-    std::unique_ptr<Decoder> createVideoDecoder(AVStream* stream, bool hardwareAccelerated, void* hardwareContext);
-    std::unique_ptr<Decoder> createAudioDecoder(AVStream* stream);
-    std::optional<VideoDecoderTestResult> testVideoDecoder(
-        Decoder& decoder,
-        int streamIndex,
-        const std::vector<PixelFormat>& requirePixelFormats
-    );
-    std::optional<AudioDecoderTestResult> testAudioDecoder(
-        Decoder& decoder,
-        int streamIndex,
-        const std::vector<SampleFormat>& requireSampleFormats
-    );
-    DecodeWorkerPtr createVideoDecodeWorker(
-        AVStream* stream,
-        std::unique_ptr<Decoder>&& decoder,
-        FrameProcessorPtr processor
-    );
-    DecodeWorkerPtr createAudioDecodeWorker(
-        AVStream* stream,
-        std::unique_ptr<Decoder>&& decoder,
-        FrameProcessorPtr processor
-    );
+    std::unique_ptr<Decoder> createDecoder(AVStream* stream, bool hwaccel = false, void* hwctx = nullptr);
+    DecodeWorkerPtr createVideoDecodeWorker(AVStream* stream, std::unique_ptr<Decoder>&& decoder, FrameProcessorPtr processor);
+    DecodeWorkerPtr createAudioDecodeWorker(AVStream* stream, std::unique_ptr<Decoder>&& decoder, FrameProcessorPtr processor);
 
     void demuxWorkerFunc();
-
-    std::optional<std::shared_ptr<SwsConvertor>> createSwsConvertor(const fh::FramePtr& frame, AVPixelFormat target);
 private:
     std::string m_source;
     std::string m_logDir;
