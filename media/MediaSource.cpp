@@ -89,7 +89,8 @@ std::expected<PixelFormat, StreamError> MediaSource::enableVideoStream(
     }
 
     if (stream->codecpar->codec_type != AVMEDIA_TYPE_VIDEO) {
-        return std::unexpected(StreamError::InvalidIndex);
+        LOG_ERROR(m_logger, "Stream type mismatch: expected video");
+        return std::unexpected(StreamError::StreamTypeMismatch);
     }
 
     LOG_INFO(m_logger, "Got stream. Index = {}, codec = {}", streamIndex, avcodec_get_name(stream->codecpar->codec_id));
@@ -112,7 +113,15 @@ std::expected<PixelFormat, StreamError> MediaSource::enableVideoStream(
     // 检查像素格式是否在请求的格式里，如果不在，要创建转换器(硬解码时忽略)
     std::shared_ptr<SwsConvertor> converter{nullptr};
     if (!hardwareAccelerated && std::find(requirePixelFormats.begin(), requirePixelFormats.end(), retFormat) == requirePixelFormats.end()) {
-        AVPixelFormat target = MediaFrame::toAvPixelFormat(requirePixelFormats[0]); // 前面已经保证过列表非空
+        // 请求列表里可能含不可映射的项(如 None)，取第一个可映射的格式作为转换目标
+        auto targetIt = std::find_if(requirePixelFormats.begin(), requirePixelFormats.end(), [](PixelFormat format) {
+            return MediaFrame::toAvPixelFormat(format) != AV_PIX_FMT_NONE;
+        });
+        if (targetIt == requirePixelFormats.end()) {
+            LOG_ERROR(m_logger, "No mappable pixel format in requested formats");
+            return std::unexpected(StreamError::DecoderCreationFailed);
+        }
+        AVPixelFormat target = MediaFrame::toAvPixelFormat(*targetIt);
         SwsConvertor::Options opts{};
         opts.targetFormat = target;
         converter = std::make_shared<SwsConvertor>(opts);
@@ -122,7 +131,7 @@ std::expected<PixelFormat, StreamError> MediaSource::enableVideoStream(
             LOG_ERROR(m_logger, "Failed to convert frame");
             return std::unexpected(StreamError::DecoderCreationFailed);
         }
-        retFormat = requirePixelFormats[0];
+        retFormat = *targetIt;
     }
 
     auto decodeWorker = createVideoDecodeWorker(stream, std::move(decoder), converter);
@@ -160,7 +169,8 @@ std::expected<SampleFormat, StreamError> MediaSource::enableAudioStream(int stre
     }
 
     if (stream->codecpar->codec_type != AVMEDIA_TYPE_AUDIO) {
-        return std::unexpected(StreamError::InvalidIndex);
+        LOG_ERROR(m_logger, "Stream type mismatch: expected audio");
+        return std::unexpected(StreamError::StreamTypeMismatch);
     }
 
     LOG_INFO(m_logger, "Got stream. Index = {}, codec = {}", streamIndex, avcodec_get_name(stream->codecpar->codec_id));
@@ -183,9 +193,18 @@ std::expected<SampleFormat, StreamError> MediaSource::enableAudioStream(int stre
     // 检查采样格式是否在请求的格式里，如果不在，要创建转换器
     std::shared_ptr<SwrConvertor> converter{nullptr};
     if (std::find(requireSampleFormats.begin(), requireSampleFormats.end(), retFormat) == requireSampleFormats.end()) {
-        AVSampleFormat target = MediaFrame::toAvSampleFormat(requireSampleFormats[0]); // 前面已经保证过列表非空
+        // 请求列表里可能含不可映射的项(如 None)，取第一个可映射的格式作为转换目标
+        auto targetIt = std::find_if(requireSampleFormats.begin(), requireSampleFormats.end(), [](SampleFormat format) {
+            return MediaFrame::toAvSampleFormat(format) != AV_SAMPLE_FMT_NONE;
+        });
+        if (targetIt == requireSampleFormats.end()) {
+            LOG_ERROR(m_logger, "No mappable sample format in requested formats");
+            return std::unexpected(StreamError::DecoderCreationFailed);
+        }
+        AVSampleFormat target = MediaFrame::toAvSampleFormat(*targetIt);
         SwrConvertor::Options opts{};
         opts.targetFormat = target;
+        opts.logger = m_logger;
         converter = std::make_shared<SwrConvertor>(opts);
         // 测试一下工作是否正常，就用刚才测试解码时的帧
         auto retFrame = converter->process(mediaFrame.frame());
@@ -193,7 +212,7 @@ std::expected<SampleFormat, StreamError> MediaSource::enableAudioStream(int stre
             LOG_ERROR(m_logger, "Failed to convert frame");
             return std::unexpected(StreamError::DecoderCreationFailed);
         }
-        retFormat = requireSampleFormats[0];
+        retFormat = *targetIt;
     }
 
     auto decodeWorker = createAudioDecodeWorker(stream, std::move(decoder), converter);
@@ -453,12 +472,14 @@ void MediaSource::demuxWorkerFunc()
 std::unique_ptr<Decoder> MediaSource::createDecoder(const AVStream* stream, bool hwaccel, void* hwctx)
 {
     Decoder::Options opts{};
-    if (stream->codecpar->codec_type == AVMEDIA_TYPE_VIDEO && hwaccel) {
+    if (hwaccel) {
 #ifdef _WIN32
         opts.type = Decoder::Type::D3d11va;
         opts.hardwareContext = hwctx;
 #else
-        opts.type = Decoder::Type::Software;
+        // 硬解不支持时直接失败，不回退软解：调用方是按硬解输出格式(如 D3D11 纹理)准备的渲染路径
+        LOG_ERROR(m_logger, "Hardware acceleration is not supported on this platform");
+        return nullptr;
 #endif
     } else {
         opts.type = Decoder::Type::Software;

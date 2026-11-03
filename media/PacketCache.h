@@ -14,7 +14,11 @@ namespace media {
 // 不加锁：调用方(MediaSource)需保证探测只发生在 demux 线程未运行时。
 class PacketCache {
 public:
-    PacketCache(std::unique_ptr<Demuxer> demuxer, LoggerPtr logger, size_t capacity = 300);
+    // 缓存默认容量。DecodeProbe 的单次探测总包上限引用此值，两者耦合保证
+    // 首轮探测读到的包不会溢出缓存（溢出的包不参与后续回放，见 probeReadPacket）
+    static constexpr size_t PACKET_CACHE_CAPACITY = 300;
+
+    PacketCache(std::unique_ptr<Demuxer> demuxer, LoggerPtr logger, size_t capacity = PACKET_CACHE_CAPACITY);
 
     // Demuxer 的只读访问（流信息、时长等）
     const Demuxer& demuxer() const { return *m_demuxer; }
