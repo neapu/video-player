@@ -302,6 +302,12 @@ void MediaSource::stop()
     if (m_demuxRunning.load()) {
         m_demuxRunning.store(false);
         m_packetCache->cancel();
+        // 中断所有解码线程：既解除解码线程在满帧队列上的阻塞，
+        // 也让 demux 线程在 pushPacket 满包队列上的等待立即返回，
+        // 否则 join 会永久等待(cancel 只能打断 demuxer 的阻塞读)
+        for (auto& decodeWorker: m_decodeWorkers) {
+            decodeWorker.second->interrupt();
+        }
         if (m_demuxThread.joinable()) {
             m_demuxThread.join();
         }
