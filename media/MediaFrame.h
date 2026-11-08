@@ -29,6 +29,9 @@ public:
     int vStride() const override;
     uint8_t* uv() const override;
     int uvStride() const override;
+    uint8_t* audioData(int plane) const override;
+    int audioDataSize(int plane) const override;
+    int64_t duration() const override;
 #ifdef _WIN32
     ID3D11Texture2D* texture() const override;
     int subresource() const override;

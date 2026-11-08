@@ -135,6 +135,36 @@ public:
      */
     virtual int uvStride() const = 0;
 
+    /**
+     * @brief 获取音频平面数据指针
+     * @param plane 平面索引。交织格式（S16le / S32le / Flt）仅平面 0 有效；
+     *              平面格式（*Planar）每个声道一个平面，索引范围 0 ~ channels-1
+     * @return uint8_t* 平面数据指针，非音频帧或索引无效时返回 nullptr
+     */
+    virtual uint8_t* audioData(int plane) const = 0;
+
+    /**
+     * @brief 获取音频平面的有效数据字节数
+     * @param plane 平面索引，规则同 audioData()
+     * @return int 有效字节数，非音频帧或索引无效时返回 0
+     * @note 按帧格式参数计算：交织格式为 采样数 × 每采样字节数 × 声道数，
+     *       平面格式为 采样数 × 每采样字节数。不能使用底层缓冲区的行字节数，其可能包含对齐填充
+     */
+    virtual int audioDataSize(int plane) const = 0;
+
+    /**
+     * @brief 获取帧时长
+     * @return int64_t 帧时长，单位微秒 (microseconds)。音频帧按 采样数 / 采样率 计算，非音频帧返回 0
+     */
+    virtual int64_t duration() const = 0;
+
+    /**
+     * @brief 获取采样格式的每采样字节数
+     * @param format 采样格式
+     * @return int 每采样（每声道）字节数，未知格式返回 0
+     */
+    static int bytesPerSample(SampleFormat format);
+
 #ifdef _WIN32
     /**
      * @brief 获取 GPU 帧的 D3D11 纹理指针（仅 MemoryType::Gpu 帧）

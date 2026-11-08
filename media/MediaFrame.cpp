@@ -5,6 +5,7 @@
 extern "C" {
 #include <libavutil/pixfmt.h>
 #include <libavutil/hwcontext.h>
+#include <libavutil/samplefmt.h>
 }
 
 namespace {
@@ -117,6 +118,22 @@ namespace media {
 std::unique_ptr<IMediaFrame> IMediaFrame::makeEmptyFrame()
 {
     return std::make_unique<MediaFrame>(FrameType::Empty, nullptr);
+}
+
+int IMediaFrame::bytesPerSample(SampleFormat format)
+{
+    switch (format) {
+    case SampleFormat::S16le:
+    case SampleFormat::S16lePlanar:
+        return 2;
+    case SampleFormat::S32le:
+    case SampleFormat::S32lePlanar:
+    case SampleFormat::Flt:
+    case SampleFormat::FltPlanar:
+        return 4;
+    default:
+        return 0;
+    }
 }
 
 std::optional<MediaFrame> MediaFrame::createFrame(FrameType type)
@@ -273,6 +290,46 @@ int MediaFrame::uvStride() const
         return 0;
     }
     return m_frame->linesize[1];
+}
+
+uint8_t* MediaFrame::audioData(int plane) const
+{
+    // 视频帧的 nb_samples 恒为 0，以此区分音频帧
+    if (!m_frame || m_frame->nb_samples <= 0) {
+        return nullptr;
+    }
+    if (plane < 0 || plane >= AV_NUM_DATA_POINTERS) {
+        return nullptr;
+    }
+    // 平面格式每个声道一个平面，交织格式仅平面 0 有效
+    bool planar = av_sample_fmt_is_planar(static_cast<AVSampleFormat>(m_frame->format));
+    if (planar ? plane >= m_frame->ch_layout.nb_channels : plane != 0) {
+        return nullptr;
+    }
+    return m_frame->data[plane];
+}
+
+int MediaFrame::audioDataSize(int plane) const
+{
+    if (!audioData(plane)) {
+        return 0;
+    }
+    int bytesPerSample = IMediaFrame::bytesPerSample(::toSampleFormat(m_frame->format));
+    if (bytesPerSample == 0) {
+        return 0;
+    }
+    // 交织格式的单个平面包含全部声道数据，平面格式的每个平面只含一个声道
+    bool planar = av_sample_fmt_is_planar(static_cast<AVSampleFormat>(m_frame->format));
+    int channels = planar ? 1 : m_frame->ch_layout.nb_channels;
+    return m_frame->nb_samples * bytesPerSample * channels;
+}
+
+int64_t MediaFrame::duration() const
+{
+    if (!m_frame || m_frame->nb_samples <= 0 || m_frame->sample_rate <= 0) {
+        return 0;
+    }
+    return av_rescale_q(m_frame->nb_samples, AVRational{1, m_frame->sample_rate}, AVRational{1, 1000000}); // Convert to microseconds
 }
 
 #ifdef _WIN32
