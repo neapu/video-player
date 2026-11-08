@@ -18,14 +18,11 @@ public:
 
     ~AudioRenderer();
 
-    void start(std::function<media::MediaFramePtr()> frameSource);
+    bool start(std::function<media::MediaFramePtr()> frameSource);
     void stop();
 
     // 取值 0.0 ~ 1.0
     void setVolume(float volume);
-
-    // 音频时钟（微秒）：媒体时间轴上"正在被听到"的采样时刻
-    int64_t playbackPosition() const;
 
 private:
     explicit AudioRenderer(const Options& options);
@@ -41,5 +38,7 @@ private:
     ma_device m_device;
 
     std::function<media::MediaFramePtr()> m_frameSource;
+    media::MediaFramePtr m_playingFrame;
+    size_t m_playingOffset{0};
 };
 } // namespace view
