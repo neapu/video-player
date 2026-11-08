@@ -21,9 +21,18 @@ public:
 
     FrameType type() const override { return m_type; }
     FrameFormat format() const override;
-    uint8_t* data(int plane) override;
-    const uint8_t* data(int plane) const override;
-    int lineSize(int plane) const override;
+    uint8_t* y() const override;
+    int yStride() const override;
+    uint8_t* u() const override;
+    int uStride() const override;
+    uint8_t* v() const override;
+    int vStride() const override;
+    uint8_t* uv() const override;
+    int uvStride() const override;
+#ifdef _WIN32
+    ID3D11Texture2D* texture() const override;
+    int subresource() const override;
+#endif
     void* rawFrame() override { return m_frame.get(); }
     const void* rawFrame() const override { return m_frame.get(); }
     void* release() override;

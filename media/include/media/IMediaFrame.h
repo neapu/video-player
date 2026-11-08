@@ -2,6 +2,10 @@
 #include <cstdint>
 #include <memory>
 
+#ifdef _WIN32
+struct ID3D11Texture2D;
+#endif
+
 namespace media {
 enum class PixelFormat {
     None,
@@ -84,21 +88,66 @@ public:
     virtual FrameFormat format() const = 0;
 
     /**
-     * @brief 获取帧数据
-     * @param plane 数据索引
-     * @return uint8_t* 帧数据指针
-     * @note 对应 FFmpeg 的 AVFrame 中的 data 字段
+     * @brief 获取 Y 平面数据指针（所有视频格式均有）
+     * @return uint8_t* Y 平面数据指针，非视频帧或无数据时返回 nullptr
      */
-    virtual uint8_t* data(int plane) = 0;
-    virtual const uint8_t* data(int plane) const = 0;
+    virtual uint8_t* y() const = 0;
 
     /**
-     * @brief 获取每行字节数
-     * @param plane 数据索引
-     * @return int 每行字节数
-     * @note 对应 FFmpeg 的 AVFrame 中的 linesize 字段
+     * @brief 获取 Y 平面每行字节数
+     * @return int 每行字节数，非视频帧或无数据时返回 0
      */
-    virtual int lineSize(int plane) const = 0;
+    virtual int yStride() const = 0;
+
+    /**
+     * @brief 获取 U 平面数据指针（仅 Yuv420p / Yuv420p10le 格式）
+     * @return uint8_t* U 平面数据指针，其他格式返回 nullptr
+     */
+    virtual uint8_t* u() const = 0;
+
+    /**
+     * @brief 获取 U 平面每行字节数（仅 Yuv420p / Yuv420p10le 格式）
+     * @return int 每行字节数，其他格式返回 0
+     */
+    virtual int uStride() const = 0;
+
+    /**
+     * @brief 获取 V 平面数据指针（仅 Yuv420p / Yuv420p10le 格式）
+     * @return uint8_t* V 平面数据指针，其他格式返回 nullptr
+     */
+    virtual uint8_t* v() const = 0;
+
+    /**
+     * @brief 获取 V 平面每行字节数（仅 Yuv420p / Yuv420p10le 格式）
+     * @return int 每行字节数，其他格式返回 0
+     */
+    virtual int vStride() const = 0;
+
+    /**
+     * @brief 获取 UV 交织平面数据指针（仅 Nv12 / P010le 格式）
+     * @return uint8_t* UV 平面数据指针，其他格式返回 nullptr
+     */
+    virtual uint8_t* uv() const = 0;
+
+    /**
+     * @brief 获取 UV 交织平面每行字节数（仅 Nv12 / P010le 格式）
+     * @return int 每行字节数，其他格式返回 0
+     */
+    virtual int uvStride() const = 0;
+
+#ifdef _WIN32
+    /**
+     * @brief 获取 GPU 帧的 D3D11 纹理指针（仅 MemoryType::Gpu 帧）
+     * @return ID3D11Texture2D* 纹理指针（可能是纹理数组），非 GPU 帧返回 nullptr
+     */
+    virtual ID3D11Texture2D* texture() const = 0;
+
+    /**
+     * @brief 获取 GPU 帧纹理在纹理数组中的切片索引（仅 MemoryType::Gpu 帧）
+     * @return int 切片索引（即 MipLevel 为 0 时的子资源索引），非 GPU 帧返回 0
+     */
+    virtual int subresource() const = 0;
+#endif
 
     /**
      * @brief 获取底层 AVFrame 原始指针

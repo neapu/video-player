@@ -108,12 +108,12 @@ void D3D11ShaderResource::updateTexture(QRhiResourceUpdateBatch* rub, const Fram
         return;
     }
 
-    auto* texture = reinterpret_cast<ID3D11Texture2D*>(frame->data(0));
+    auto* texture = frame->texture();
     if (!texture) {
         qCritical() << "Texture is null";
         return;
     }
-    int subresource = static_cast<int>(reinterpret_cast<uintptr_t>(frame->data(1)));
+    int subresource = frame->subresource();
 
     D3D11_BOX srcBox{};
     srcBox.left = 0;

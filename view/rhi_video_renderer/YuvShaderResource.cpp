@@ -29,17 +29,17 @@ void YuvShaderResource::updateTexture(QRhiResourceUpdateBatch* rub, const Frame&
     };
 
     if (m_format == PixelFormat::Yuv420p || m_format == PixelFormat::Yuv420p10le) {
-        QByteArray yData(reinterpret_cast<const char*>(frame->data(0)), frame->lineSize(0) * format.height);
-        uploadTextureData(m_yTexture.get(), yData, format.width, format.height, frame->lineSize(0));
-        QByteArray uData(reinterpret_cast<const char*>(frame->data(1)), frame->lineSize(1) * (format.height / 2));
-        uploadTextureData(m_uTexture.get(), uData, (format.width + 1) / 2, (format.height + 1) / 2, frame->lineSize(1));
-        QByteArray vData(reinterpret_cast<const char*>(frame->data(2)), frame->lineSize(2) * (format.height / 2));
-        uploadTextureData(m_vTexture.get(), vData, (format.width + 1) / 2, (format.height + 1) / 2, frame->lineSize(2));
+        QByteArray yData(reinterpret_cast<const char*>(frame->y()), frame->yStride() * format.height);
+        uploadTextureData(m_yTexture.get(), yData, format.width, format.height, frame->yStride());
+        QByteArray uData(reinterpret_cast<const char*>(frame->u()), frame->uStride() * (format.height / 2));
+        uploadTextureData(m_uTexture.get(), uData, (format.width + 1) / 2, (format.height + 1) / 2, frame->uStride());
+        QByteArray vData(reinterpret_cast<const char*>(frame->v()), frame->vStride() * (format.height / 2));
+        uploadTextureData(m_vTexture.get(), vData, (format.width + 1) / 2, (format.height + 1) / 2, frame->vStride());
     } else if (m_format == PixelFormat::Nv12 || m_format == PixelFormat::P010le) {
-        QByteArray yData(reinterpret_cast<const char*>(frame->data(0)), frame->lineSize(0) * format.height);
-        uploadTextureData(m_yTexture.get(), yData, format.width, format.height, frame->lineSize(0));
-        QByteArray uvData(reinterpret_cast<const char*>(frame->data(1)), frame->lineSize(1) * (format.height / 2));
-        uploadTextureData(m_uvTexture.get(), uvData, (format.width + 1) / 2, (format.height + 1) / 2, frame->lineSize(1));
+        QByteArray yData(reinterpret_cast<const char*>(frame->y()), frame->yStride() * format.height);
+        uploadTextureData(m_yTexture.get(), yData, format.width, format.height, frame->yStride());
+        QByteArray uvData(reinterpret_cast<const char*>(frame->uv()), frame->uvStride() * (format.height / 2));
+        uploadTextureData(m_uvTexture.get(), uvData, (format.width + 1) / 2, (format.height + 1) / 2, frame->uvStride());
     } else {
         qCritical() << "Unsupported pixel format";
     }

@@ -1,4 +1,7 @@
 #include "MediaFrame.h"
+#ifdef _WIN32
+#include <d3d11.h>
+#endif
 extern "C" {
 #include <libavutil/pixfmt.h>
 #include <libavutil/hwcontext.h>
@@ -184,29 +187,113 @@ FrameFormat MediaFrame::format() const
     return fmt;
 }
 
-uint8_t* MediaFrame::data(int plane)
+uint8_t* MediaFrame::y() const
 {
-    if (!m_frame || plane < 0 || plane >= AV_NUM_DATA_POINTERS) {
+    if (!m_frame) {
         return nullptr;
     }
-    return m_frame->data[plane];
+    return m_frame->data[0];
 }
 
-const uint8_t* MediaFrame::data(int plane) const
+int MediaFrame::yStride() const
 {
-    if (!m_frame || plane < 0 || plane >= AV_NUM_DATA_POINTERS) {
-        return nullptr;
-    }
-    return m_frame->data[plane];
-}
-
-int MediaFrame::lineSize(int plane) const
-{
-    if (!m_frame || plane < 0 || plane >= AV_NUM_DATA_POINTERS) {
+    if (!m_frame) {
         return 0;
     }
-    return m_frame->linesize[plane];
+    return m_frame->linesize[0];
 }
+
+uint8_t* MediaFrame::u() const
+{
+    if (!m_frame) {
+        return nullptr;
+    }
+    auto format = ::toPixelFormat(m_frame->format);
+    if (format != PixelFormat::Yuv420p && format != PixelFormat::Yuv420p10le) {
+        return nullptr;
+    }
+    return m_frame->data[1];
+}
+
+int MediaFrame::uStride() const
+{
+    if (!m_frame) {
+        return 0;
+    }
+    auto format = ::toPixelFormat(m_frame->format);
+    if (format != PixelFormat::Yuv420p && format != PixelFormat::Yuv420p10le) {
+        return 0;
+    }
+    return m_frame->linesize[1];
+}
+
+uint8_t* MediaFrame::v() const
+{
+    if (!m_frame) {
+        return nullptr;
+    }
+    auto format = ::toPixelFormat(m_frame->format);
+    if (format != PixelFormat::Yuv420p && format != PixelFormat::Yuv420p10le) {
+        return nullptr;
+    }
+    return m_frame->data[2];
+}
+
+int MediaFrame::vStride() const
+{
+    if (!m_frame) {
+        return 0;
+    }
+    auto format = ::toPixelFormat(m_frame->format);
+    if (format != PixelFormat::Yuv420p && format != PixelFormat::Yuv420p10le) {
+        return 0;
+    }
+    return m_frame->linesize[2];
+}
+
+uint8_t* MediaFrame::uv() const
+{
+    if (!m_frame) {
+        return nullptr;
+    }
+    auto format = ::toPixelFormat(m_frame->format);
+    if (format != PixelFormat::Nv12 && format != PixelFormat::P010le) {
+        return nullptr;
+    }
+    return m_frame->data[1];
+}
+
+int MediaFrame::uvStride() const
+{
+    if (!m_frame) {
+        return 0;
+    }
+    auto format = ::toPixelFormat(m_frame->format);
+    if (format != PixelFormat::Nv12 && format != PixelFormat::P010le) {
+        return 0;
+    }
+    return m_frame->linesize[1];
+}
+
+#ifdef _WIN32
+ID3D11Texture2D* MediaFrame::texture() const
+{
+    if (!m_frame || !m_frame->hw_frames_ctx) {
+        return nullptr;
+    }
+    // AV_PIX_FMT_D3D11 约定：data[0] 存放 ID3D11Texture2D*（纹理数组）
+    return reinterpret_cast<ID3D11Texture2D*>(m_frame->data[0]);
+}
+
+int MediaFrame::subresource() const
+{
+    if (!m_frame || !m_frame->hw_frames_ctx) {
+        return 0;
+    }
+    // AV_PIX_FMT_D3D11 约定：data[1] 以指针宽度整数存放纹理数组切片索引
+    return static_cast<int>(reinterpret_cast<uintptr_t>(m_frame->data[1]));
+}
+#endif
 
 void* MediaFrame::release()
 {
