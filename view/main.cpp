@@ -11,11 +11,8 @@ int main(int argc, char *argv[])
 
     view::LogManager::installMessageHandler();
     QApplication app(argc, argv);
-    view::MainWindow window;
+    view::MainWindow window{{filePath}};
     window.show();
-    if (!filePath.isEmpty()) {
-        window.openFile(filePath);
-    }
     int ret = app.exec();
     view::LogManager::uninstallMessageHandler();
     return ret;

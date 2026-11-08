@@ -173,6 +173,8 @@ void QRhiVideoRenderer::initialize(QRhiCommandBuffer* cb)
     cb->resourceUpdate(rub);
 
     qInfo() << "QRhiVideoRenderer initialized.";
+
+    emit initialized();
 }
 void QRhiVideoRenderer::render(QRhiCommandBuffer* cb)
 {

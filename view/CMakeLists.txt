@@ -35,6 +35,18 @@ if (WIN32)
         WIN32_EXECUTABLE $<NOT:$<CONFIG:Debug>>
     )
 
+    file(GLOB FFMPEG_DLLS CONFIGURE_DEPENDS "${FFMPEG_DIR}/bin/*.dll")
+    if (NOT FFMPEG_DLLS)
+        message(FATAL_ERROR "No FFmpeg DLLs found in ${FFMPEG_DIR}/bin.")
+    endif()
+    add_custom_command(TARGET ${EXE_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${FFMPEG_DLLS}
+            $<TARGET_FILE_DIR:${EXE_NAME}>
+        COMMENT "Deploying FFmpeg DLLs..."
+        VERBATIM
+    )
+
     # 配置Windows平台下，自动拷贝Qt依赖库到bin目录
     find_program(WINDEPLOYQT_EXECUTABLE NAMES windeployqt HINTS "${Qt6_DIR}/../../../bin")
     if (WINDEPLOYQT_EXECUTABLE)

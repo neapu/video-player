@@ -2,7 +2,9 @@
 #include <QVBoxLayout>
 namespace view {
 
-MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
+MainWindow::MainWindow(const Options &options, QWidget* parent) 
+    : QMainWindow(parent)
+    , m_initialFilePath(options.initialFilePath)
 {
     resize(800, 600);
 
@@ -18,6 +20,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
 
     m_controller = new Controller(this);
     m_controller->setVideoSink(m_videoRenderer);
+
+    connect(m_videoRenderer, &QRhiVideoRenderer::initialized, this, &MainWindow::onVideoRendererInitialized, Qt::QueuedConnection);
 }
 
 MainWindow::~MainWindow()
@@ -32,5 +36,13 @@ void MainWindow::openFile(const QString &filePath)
     }
 
     m_controller->openFile(filePath);
+}
+
+void MainWindow::onVideoRendererInitialized()
+{
+    if (!m_initialFilePath.isEmpty()) {
+        openFile(m_initialFilePath);
+        m_initialFilePath.clear();
+    }
 }
 } // namespace view

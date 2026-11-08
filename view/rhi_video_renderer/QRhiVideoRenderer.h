@@ -21,6 +21,7 @@ public:
 #endif
 
 signals:
+    void initialized();
     void errorOccured(const QString& msg);
 
 protected:

@@ -14,6 +14,7 @@ std::expected<std::unique_ptr<IMediaSource>, CreateError> IMediaSource::create(c
 
 MediaSource::~MediaSource()
 {
+    FUNC_TRACE(m_logger, LogLevel::info);
     // stop() 已做全量复位(停线程、移除所有流)
     stop();
     if (m_logger) {
@@ -277,6 +278,7 @@ void MediaSource::seek(int64_t timestamp)
 
 StartError MediaSource::start()
 {
+    FUNC_TRACE(m_logger, LogLevel::info);
     std::lock_guard<std::mutex> lock(m_stateMutex);
     if (m_demuxRunning.load()) {
         LOG_ERROR(m_logger, "Already started");
@@ -297,6 +299,7 @@ StartError MediaSource::start()
 
 void MediaSource::stop()
 {
+    FUNC_TRACE(m_logger, LogLevel::info);
     // 必须持锁 join：保证 demux 线程存活期间没有其他线程能拿到锁去写 m_decodeWorkers
     std::lock_guard<std::mutex> lock(m_stateMutex);
     if (m_demuxRunning.load()) {
