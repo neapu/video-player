@@ -63,9 +63,9 @@ public:
      * @param requirePixelFormats 期望的像素格式。
      * @param hardwareAccelerated 是否启用硬件加速，只对视频流有效。
      * @param hardwareContext 硬件上下文指针，仅在启用硬件加速时使用。裸指针安全声明：只借用，需要确保在 MediaSource 对象存在期间该指针有效。
-     * @return 成功返回实际使用的像素格式，失败返回错误。
+     * @return 成功返回探测到的输出像素格式（硬解时为硬件帧的底层像素格式；无法识别时为 None），失败返回错误。
      * @note 启用流后必须消费，否则可能饿死其他流。只能在停止状态下操作流。
-     * @note 如果启用硬件加速解码，会无视 requirePixelFormats，返回的PixelFormat没有意义(一般会返回None)
+     * @note 如果启用硬件加速解码，会无视 requirePixelFormats。
      * @note 线程安全，可与其他接口从不同线程并发调用。
      */
     virtual std::expected<PixelFormat, StreamError> enableVideoStream(

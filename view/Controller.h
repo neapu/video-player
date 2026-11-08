@@ -3,6 +3,7 @@
 #include <QString>
 #include <QMutex>
 #include <QMutexLocker>
+#include <optional>
 #include "media/IMediaSource.h"
 #include "media/IMediaFrame.h"
 #include "VideoSink.h"
@@ -42,7 +43,7 @@ private:
 
     void endOfStream();
 
-    bool enableVideoStream(bool hw);
+    std::optional<media::PixelFormat> enableVideoStream(bool hw);
 
 private:
     State m_state{State::Stopped};

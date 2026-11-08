@@ -109,6 +109,12 @@ std::expected<PixelFormat, StreamError> MediaSource::enableVideoStream(
     }
     MediaFrame mediaFrame(FrameType::Normal, std::move(frame));
 
+    if (hardwareAccelerated && (mediaFrame.format().memoryType != MemoryType::Gpu
+        || mediaFrame.frame()->format != AV_PIX_FMT_D3D11)) {
+        LOG_ERROR(m_logger, "Hardware decoder did not produce a D3D11 frame");
+        return std::unexpected(StreamError::DecoderCreationFailed);
+    }
+
     PixelFormat retFormat = mediaFrame.format().pixelFormat;
     // 检查像素格式是否在请求的格式里，如果不在，要创建转换器(硬解码时忽略)
     std::shared_ptr<SwsConvertor> converter{nullptr};
