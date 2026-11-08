@@ -24,7 +24,7 @@ void Controller::setVideoSink(VideoSink* sink)
     m_videoSink = sink;
 }
 
-void Controller::openFile(const QString& filePath)
+void Controller::openFile(const QString& filePath, bool tryHw)
 {
     if (state() != State::Stopped) {
         stop();
@@ -82,15 +82,23 @@ void Controller::openFile(const QString& filePath)
         m_videoFps = 15;
     }
 
-    auto enableExp = m_mediaSource->enableVideoStream(m_videoStreamIndex, {media::PixelFormat::Yuv420p});
-    if (!enableExp) {
-        auto err = enableExp.error();
-        qCritical() << "Failed to enable video stream. " << QString::fromStdString(media::errToString(err));
-        return;
-    }
-    if (enableExp.value() != media::PixelFormat::Yuv420p) {
-        qCritical() << "Unexpected pixel format";
-        return;
+    if (tryHw) {
+        if (enableVideoStream(true)) {
+            qInfo() << "Enabled video stream " << m_videoStreamIndex << " with hwaccel";
+        } else {
+            qWarning() << "Failed hw, try sw";
+            if (enableVideoStream(false)) {
+                qInfo() << "Enabled video stream " << m_videoStreamIndex << " with sw";
+            } else {
+                qCritical() << "Enabled video stream " << m_videoStreamIndex << " failed";
+            }
+        }
+    } else {
+        if (enableVideoStream(false)) {
+            qInfo() << "Enabled video stream " << m_videoStreamIndex << " with sw";
+        } else {
+            qCritical() << "Enabled video stream " << m_videoStreamIndex << " failed";
+        }
     }
 
     auto startError = m_mediaSource->start();
@@ -256,6 +264,45 @@ void Controller::endOfStream()
 {
     if (m_videoEnded /*&& m_audioEnded*/) {
         stop();
+    }
+}
+
+bool Controller::enableVideoStream(bool hw)
+{
+    if (hw) {
+#ifdef _WIN32
+        auto* device = m_videoSink->device();
+        if (!device) {
+            qCritical() << "No device";
+            return false;
+        }
+        auto enableExp = m_mediaSource->enableVideoStream(m_videoStreamIndex, {}, true, device);
+        if (!enableExp) {
+            auto err = enableExp.error();
+            qCritical() << "Failed to enable video stream with hwaccel. " << QString::fromStdString(media::errToString(err));
+            return false;
+        }
+
+        if (enableExp.value() == media::PixelFormat::None) {    // 少量的12bit格式，暂不支持
+            qCritical() << "Unexpected pixel format";
+            return false;
+        }
+        return true;
+#else
+        return false;
+#endif
+    } else {
+        auto enableExp = m_mediaSource->enableVideoStream(m_videoStreamIndex, {media::PixelFormat::Yuv420p});
+        if (!enableExp) {
+            auto err = enableExp.error();
+            qCritical() << "Failed to enable video stream with sw. " << QString::fromStdString(media::errToString(err));
+            return false;
+        }
+        if (enableExp.value() != media::PixelFormat::Yuv420p) {
+            qCritical() << "Unexpected pixel format";
+            return false;
+        }
+        return true;
     }
 }
 

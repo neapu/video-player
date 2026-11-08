@@ -142,7 +142,7 @@ void QRhiVideoRenderer::initialize(QRhiCommandBuffer* cb)
         if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&mt)))) {
             mt->SetMultithreadProtected(TRUE);
             m_device = device;
-            // m_d3d11DeviceContext = context;
+            m_context = context;
         } else {
             // 回退到渲染软件帧模式，不赋值m_d3d11Device和m_d3d11DeviceContext
             qWarning()

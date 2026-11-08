@@ -9,8 +9,8 @@ class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
     struct Options {
-        // 命令行输入
-        QString initialFilePath;
+        QString initialFilePath{};
+        bool hwaccel{true};
     };
 
     explicit MainWindow(const Options &options, QWidget *parent = nullptr);
@@ -23,6 +23,7 @@ private slots:
 
 private:
     QString m_initialFilePath;
+    bool m_hwaccel{true};
 
     QRhiVideoRenderer* m_videoRenderer{nullptr};
 

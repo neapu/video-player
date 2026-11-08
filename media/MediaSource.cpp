@@ -79,7 +79,7 @@ std::expected<PixelFormat, StreamError> MediaSource::enableVideoStream(
         return std::unexpected(StreamError::InvalidIndex);
     }
 
-    if (requirePixelFormats.empty()) {
+    if (!hardwareAccelerated && requirePixelFormats.empty()) {
         return std::unexpected(StreamError::RequestFormatEmpty);
     }
 

@@ -5,6 +5,7 @@ namespace view {
 MainWindow::MainWindow(const Options &options, QWidget* parent) 
     : QMainWindow(parent)
     , m_initialFilePath(options.initialFilePath)
+    , m_hwaccel(options.hwaccel)
 {
     resize(800, 600);
 
@@ -35,7 +36,7 @@ void MainWindow::openFile(const QString &filePath)
         return;
     }
 
-    m_controller->openFile(filePath);
+    m_controller->openFile(filePath, m_hwaccel);
 }
 
 void MainWindow::onVideoRendererInitialized()

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.31)
-project(video_player VERSION 1.0 LANGUAGES CXX)
+project(video_player VERSION 1.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -7,6 +7,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_compile_definitions(
     $<$<CONFIG:Debug>:DEBUG>
     $<$<CONFIG:Debug>:SOURCE_DIR="${CMAKE_SOURCE_DIR}">
+)
+
+add_compile_definitions(
+    APP_NAME="${PROJECT_NAME}"
+    APP_VERSION="${PROJECT_VERSION}"
 )
 
 if (MSVC)

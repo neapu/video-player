@@ -24,7 +24,7 @@ public:
     // 裸指针安全声明：只借用，生命周期必须大于Controller对象
     void setVideoSink(VideoSink* sink);
 
-    void openFile(const QString &filePath);
+    void openFile(const QString &filePath, bool tryHw = true);
     void pauseOrResume();
     void stop();
 
@@ -41,6 +41,8 @@ private:
     int64_t currentMediaUs(QMutexLocker<QMutex>& locker);
 
     void endOfStream();
+
+    bool enableVideoStream(bool hw);
 
 private:
     State m_state{State::Stopped};
