@@ -372,6 +372,18 @@ int64_t MediaFrame::pts() const
     return av_rescale_q(m_frame->pts, m_frame->time_base, AVRational{1, 1000000}); // Convert to microseconds
 }
 
+void MediaFrame::setPts(int64_t pts)
+{
+    if (!m_frame) {
+        return;
+    }
+    if (m_frame->time_base.num == 0 || m_frame->time_base.den == 0) {
+        // 时间基无效时无法换算，直接采用微秒时间基
+        m_frame->time_base = AVRational{1, 1000000};
+    }
+    m_frame->pts = av_rescale_q(pts, AVRational{1, 1000000}, m_frame->time_base);
+}
+
 fh::FramePtr MediaFrame::releaseFrame()
 {
     if (!m_frame) {

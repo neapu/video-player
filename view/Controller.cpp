@@ -148,7 +148,13 @@ void Controller::openFile(const QString& filePath, bool tryHw)
     m_pendingVideoFrame.reset();
 
     if (m_audioRenderer) {
-        auto ret = m_audioRenderer->start([this] { return nextAudioFrame(); });
+        auto ret = m_audioRenderer->start(
+            [this] { return nextAudioFrame(); },
+            // 音频回调线程触发，按可听位置校准时钟
+            [this](int64_t audibleUs) {
+                QMutexLocker locker(&m_clock.mutex);
+                reanchorClock(audibleUs, locker);
+            });
         if (!ret) { // 概率很小
             qCritical() << "Failed to start audio renderer";
             // 停止解码
@@ -335,8 +341,9 @@ view::Frame Controller::nextAudioFrame()
 
     auto pts = m_pendingAudioFrame->pts();
     if (pts == MIN_INT64) {
-        // 无效的pts，按累加的时长算
+        // 无效的pts，按累加的时长推算，写回后下游只需信任pts
         pts = m_audioPlayedUs;
+        m_pendingAudioFrame->setPts(pts);
     }
     if (pts > mediaUs + 200000) {
         // 达到门禁条件，先不播放
@@ -345,12 +352,7 @@ view::Frame Controller::nextAudioFrame()
 
     m_audioPlayedUs += m_pendingAudioFrame->duration();
 
-    // 校准时钟
-    {
-        QMutexLocker locker(&m_clock.mutex);
-        // TODO: 以后需要获取更精确的播放位置锚定
-        reanchorClock(pts - 10000, locker);
-    }
+    // 时钟校准由 AudioRenderer 的位置回调完成（按写入游标与实测设备缓冲估算可听位置）
     auto ret = std::move(m_pendingAudioFrame);
     m_pendingAudioFrame.reset();
     return ret;

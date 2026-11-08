@@ -201,6 +201,13 @@ public:
      * @note 单位已经转换为微秒 (microseconds)
      */
     virtual int64_t pts() const = 0;
+
+    /**
+     * @brief 设置帧的显示时间戳 (Presentation Timestamp)
+     * @param pts 显示时间戳，单位微秒 (microseconds)
+     * @note 写入底层 AVFrame（换算为其时间基）。无效pts的帧经此修正后，下游可无条件信任 pts()
+     */
+    virtual void setPts(int64_t pts) = 0;
 };
 using MediaFramePtr = std::unique_ptr<IMediaFrame>;
 

@@ -40,6 +40,7 @@ public:
     const void* rawFrame() const override { return m_frame.get(); }
     void* release() override;
     int64_t pts() const override;
+    void setPts(int64_t pts) override;
 
     fh::FramePtr releaseFrame();
     const fh::FramePtr& frame() const { return m_frame; }

@@ -76,14 +76,34 @@ bool AudioRenderer::initialize()
         return false;
     }
 
+    // 实测设备内部缓冲大小，用于估算写入到出声的延迟
+    ma_uint32 bufferFrames = 0;
+#ifdef MA_SUPPORT_WASAPI
+    // low-latency 共享模式下 internalPeriodSizeInFrames 不等于真实缓冲大小
+    if (m_device.pContext && m_device.pContext->backend == ma_backend_wasapi) {
+        bufferFrames = m_device.wasapi.actualBufferSizeInFramesPlayback;
+    }
+#endif
+    if (bufferFrames == 0) {
+        bufferFrames = m_device.playback.internalPeriodSizeInFrames * m_device.playback.internalPeriods;
+    }
+    ma_uint32 internalRate = m_device.playback.internalSampleRate;
+    if (internalRate == 0) {
+        internalRate = static_cast<ma_uint32>(m_sampleRate);
+    }
+    m_deviceBufferUs = (int64_t)bufferFrames * 1000000 / internalRate;
+    qInfo() << "Audio device buffer:" << bufferFrames << "frames," << m_deviceBufferUs << "us";
+
     ma_device_set_master_volume(&m_device, m_volume);
 
     return true;
 }
 
-bool AudioRenderer::start(std::function<media::MediaFramePtr()> frameSource)
+bool AudioRenderer::start(std::function<media::MediaFramePtr()> frameSource,
+                          std::function<void(int64_t)> positionCallback)
 {
     m_frameSource = frameSource;
+    m_positionCallback = std::move(positionCallback);
     if (!m_frameSource) {
         qCritical() << "No frame source";
         return false;
@@ -109,7 +129,9 @@ void AudioRenderer::setVolume(float volume)
 void AudioRenderer::maDataCallback(ma_device* pDevice, void* pOutput, const void* pInput, uint32_t frameCount)
 {
     const size_t requireSize = frameCount * m_channels * sizePerSample(m_sampleFormat);
+    const size_t bytesPerFrame = m_channels * sizePerSample(m_sampleFormat);
     size_t playedSize{0};
+    bool wroteData{false};
     while (playedSize < requireSize) {
         if (!m_playingFrame || m_playingOffset >= m_playingFrame->audioDataSize(0)) {
             m_playingFrame = m_frameSource();
@@ -118,16 +140,27 @@ void AudioRenderer::maDataCallback(ma_device* pDevice, void* pOutput, const void
 
         if (!m_playingFrame || m_playingFrame->type() != media::FrameType::Normal
             || m_playingFrame->audioDataSize(0) == 0) {
-            // 播放静音
+            // 播放静音，不推进游标也不上报位置，时钟由上层外推
             std::memset(static_cast<uint8_t*>(pOutput) + playedSize, 0, requireSize - playedSize);
             return;
         }
+
+        // 走到这里帧已确认有效，pts也已由上游保证（无效pts在Controller推算并写回），按帧pts重同步游标
+        m_frameStartMediaUs = m_playingFrame->pts();
 
         size_t frameSize = m_playingFrame->audioDataSize(0) - m_playingOffset;
         size_t copySize = std::min(requireSize - playedSize, frameSize);
         std::memcpy(static_cast<uint8_t*>(pOutput) + playedSize, m_playingFrame->audioData(0) + m_playingOffset, copySize);
         playedSize += copySize;
         m_playingOffset += copySize;
+        wroteData = true;
+        m_writeCursorMediaUs = m_frameStartMediaUs
+            + (int64_t)(m_playingOffset / bytesPerFrame) * 1000000 / m_sampleRate;
+    }
+
+    // 回调结束时设备缓冲刚好填满，此刻的可听位置 = 写入游标 - 设备缓冲时长
+    if (wroteData && m_positionCallback) {
+        m_positionCallback(m_writeCursorMediaUs - m_deviceBufferUs);
     }
 }
 
