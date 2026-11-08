@@ -164,7 +164,7 @@ void Controller::openFile(const QString& filePath, bool tryHw)
         }
     }
 
-    m_lastVideoPts = 0;
+    m_videoPlayedUs = 0;
     m_videoEnded = false;
     m_pendingVideoFrame.reset();
 
@@ -223,7 +223,7 @@ view::Frame Controller::nextVideoFrame()
         return nullptr;
     }
 
-    // 一帧的时长，单位微秒，仅用于估算无效pts
+    // 一帧的时长，单位微秒，视频帧的duration()为0，按帧率估算，用于累计播放时长和估算无效pts
     const int64_t frameIntervalUs = static_cast<int64_t>(1000000 / m_videoFps);
 
     while (true) {
@@ -255,8 +255,9 @@ view::Frame Controller::nextVideoFrame()
 
         int64_t pts = m_pendingVideoFrame->pts();
         if (pts == MIN_INT64) {
-            // 无效的pts，根据上一帧的pts和帧率估算
-            pts = m_lastVideoPts + frameIntervalUs;
+            // 无效的pts，按累计的播放时长推算，写回后下游只需信任pts
+            pts = m_videoPlayedUs;
+            m_pendingVideoFrame->setPts(pts);
         }
 
         // 如果大于媒体时间，先不渲染，本函数不能阻塞，等待下一次刷新请求
@@ -279,8 +280,9 @@ view::Frame Controller::nextVideoFrame()
             if (next->type() == media::FrameType::Normal) {
                 int64_t nextPts = next->pts();
                 if (nextPts == MIN_INT64) {
-                    // 无效的pts，按当前帧的pts加一帧间隔估算
-                    nextPts = pts + frameIntervalUs;
+                    // 无效的pts，当前帧消费后累计播放时长再加一帧间隔，写回后下游只需信任pts
+                    nextPts = m_videoPlayedUs + frameIntervalUs;
+                    next->setPts(nextPts);
                 }
                 if (nextPts <= mediaUs) {
                     // 更新的帧也已到期，当前帧没必要再上屏
@@ -292,12 +294,12 @@ view::Frame Controller::nextVideoFrame()
         }
 
         if (superseded) {
-            m_lastVideoPts = pts;   // 丢弃也要更新，不然下一帧会算错
+            m_videoPlayedUs += frameIntervalUs; // 丢弃也要累计，不然下一帧会算错
             continue;
         }
 
         // 当前帧是队列中最新的已到期帧，上屏
-        m_lastVideoPts = pts;   // 上屏或丢弃时才更新，不然下一次请求的是同一帧，可能导致错误累计
+        m_videoPlayedUs += frameIntervalUs;     // 上屏或丢弃时才累计，不然下一次请求的是同一帧，会重复累计
         {
             QMutexLocker locker(&m_clock.mutex);
             reanchorClock(mediaUs, locker);

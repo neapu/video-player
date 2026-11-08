@@ -59,7 +59,7 @@ private:
     std::unique_ptr<media::IMediaSource> m_mediaSource{nullptr};
 
     int m_videoStreamIndex{-1};
-    int64_t m_lastVideoPts{0};
+    int64_t m_videoPlayedUs{0};
     double m_videoFps{0};
     bool m_videoEnded{false};
     media::MediaFramePtr m_pendingVideoFrame{nullptr};
