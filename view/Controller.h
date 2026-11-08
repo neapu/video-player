@@ -7,6 +7,7 @@
 #include "media/IMediaSource.h"
 #include "media/IMediaFrame.h"
 #include "VideoSink.h"
+#include "audio_renderer/AudioRenderer.h"
 
 namespace view {
 class Controller : public QObject {
@@ -35,6 +36,7 @@ public:
 private:
     // 不阻塞，不渲染时返回nullptr，不会返回控制帧
     view::Frame nextVideoFrame();
+    view::Frame nextAudioFrame();
 
     // 根据媒体时间重锚时钟
     void reanchorClock(int64_t mediaUs, QMutexLocker<QMutex>& locker);
@@ -43,13 +45,16 @@ private:
 
     void endOfStream();
 
-    std::optional<media::PixelFormat> enableVideoStream(bool hw);
+    std::optional<view::PixelFormat> enableVideoStream(bool& hw);
+    std::optional<view::SampleFormat> enableAudioStream();
 
 private:
     State m_state{State::Stopped};
     // mutable QMutex m_stateMutex;
 
     VideoSink* m_videoSink{nullptr};
+
+    std::unique_ptr<view::AudioRenderer> m_audioRenderer{nullptr};
 
     std::unique_ptr<media::IMediaSource> m_mediaSource{nullptr};
 
@@ -58,6 +63,11 @@ private:
     double m_videoFps{0};
     bool m_videoEnded{false};
     media::MediaFramePtr m_pendingVideoFrame{nullptr};
+
+    std::atomic_int m_audioStreamIndex{-1};
+    std::atomic_bool m_audioEnded{false};
+    int64_t m_audioPlayedUs{0};
+    media::MediaFramePtr m_pendingAudioFrame{nullptr};
 
     struct Clock {
         QMutex mutex;

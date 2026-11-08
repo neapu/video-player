@@ -1,5 +1,6 @@
 #include "AudioRenderer.h"
 #include <QDebug>
+#include <cstring>
 
 namespace {
 ma_format sampleFormatToMa(media::SampleFormat fmt)
@@ -9,6 +10,15 @@ ma_format sampleFormatToMa(media::SampleFormat fmt)
         case media::SampleFormat::S16le: return ma_format_s16;
         case media::SampleFormat::S32le: return ma_format_s32;
         default: return ma_format_unknown; // 暂不处理平面格式
+    }
+}
+size_t sizePerSample(media::SampleFormat fmt)
+{
+    switch(fmt) {
+        case media::SampleFormat::Flt: return 4;
+        case media::SampleFormat::S16le: return 2;
+        case media::SampleFormat::S32le: return 4;
+        default: return 0;
     }
 }
 }
@@ -78,7 +88,7 @@ bool AudioRenderer::start(std::function<media::MediaFramePtr()> frameSource)
         qCritical() << "No frame source";
         return false;
     }
-    if (!ma_device_start(&m_device)) {
+    if (ma_device_start(&m_device) != MA_SUCCESS) {
         qCritical() << "Failed to start audio device";
         return false;
     }
@@ -97,6 +107,28 @@ void AudioRenderer::setVolume(float volume)
 }
 
 void AudioRenderer::maDataCallback(ma_device* pDevice, void* pOutput, const void* pInput, uint32_t frameCount)
-{}
+{
+    const size_t requireSize = frameCount * m_channels * sizePerSample(m_sampleFormat);
+    size_t playedSize{0};
+    while (playedSize < requireSize) {
+        if (!m_playingFrame || m_playingOffset >= m_playingFrame->audioDataSize(0)) {
+            m_playingFrame = m_frameSource();
+            m_playingOffset = 0;
+        }
+
+        if (!m_playingFrame || m_playingFrame->type() != media::FrameType::Normal
+            || m_playingFrame->audioDataSize(0) == 0) {
+            // 播放静音
+            std::memset(static_cast<uint8_t*>(pOutput) + playedSize, 0, requireSize - playedSize);
+            return;
+        }
+
+        size_t frameSize = m_playingFrame->audioDataSize(0) - m_playingOffset;
+        size_t copySize = std::min(requireSize - playedSize, frameSize);
+        std::memcpy(static_cast<uint8_t*>(pOutput) + playedSize, m_playingFrame->audioData(0) + m_playingOffset, copySize);
+        playedSize += copySize;
+        m_playingOffset += copySize;
+    }
+}
 
 } // namespace view

@@ -29,7 +29,10 @@ namespace view {
 
 Controller::Controller(QObject* parent) : QObject(parent) {}
 
-Controller::~Controller() {}
+Controller::~Controller()
+{
+    stop();
+}
 
 void Controller::setVideoSink(VideoSink* sink)
 {
@@ -71,10 +74,13 @@ void Controller::openFile(const QString& filePath, bool tryHw)
     m_mediaSource = std::move(mediaSourceExp.value());
 
     m_videoStreamIndex = -1;
-    // 先测试视频
+    m_audioStreamIndex = -1;
+
     auto streamsInfo = m_mediaSource->streamsInfo();
     int videoWidth{0};
     int videoHeight{0};
+    int audioSampleRate{0};
+    int audioChannels{0};
     for (auto& info : streamsInfo) {
         if (info.type == media::StreamType::Video && m_videoStreamIndex == -1) {
             m_videoStreamIndex = info.index;
@@ -82,10 +88,15 @@ void Controller::openFile(const QString& filePath, bool tryHw)
             videoWidth = info.width;
             videoHeight = info.height;
         }
+        if (info.type == media::StreamType::Audio && m_audioStreamIndex.load() == -1) {
+            m_audioStreamIndex.store(info.index);
+            audioSampleRate = info.sampleRate;
+            audioChannels = info.channels;
+        }
     }
 
-    if (m_videoStreamIndex == -1) { // 现在先测视频，先不管纯音频
-        qCritical() << "No video stream found";
+    if (m_videoStreamIndex == -1 && m_audioStreamIndex.load() == -1) {
+        qCritical() << "No streams found";
         return;
     }
 
@@ -94,44 +105,35 @@ void Controller::openFile(const QString& filePath, bool tryHw)
         m_videoFps = 15;
     }
 
-    bool hwEnabled = false;
-    std::optional<PixelFormat> videoFormat;
-    if (tryHw) {
-        videoFormat = enableVideoStream(true);
-        if (videoFormat && *videoFormat != PixelFormat::Nv12 && *videoFormat != PixelFormat::P010le) {
-            qWarning() << "Unsupported hardware pixel format:" << pixelFormatName(*videoFormat);
-            auto err = m_mediaSource->disableStream(m_videoStreamIndex);
-            if (err != media::StreamError::None) {
-                qCritical() << "Failed to disable video stream:" << QString::fromStdString(media::errToString(err));
-                m_mediaSource.reset();
-                m_videoStreamIndex = -1;
-                return;
-            }
-            videoFormat.reset();
-        }
-        hwEnabled = videoFormat.has_value();
-        if (!hwEnabled) {
-            qWarning() << "Hardware decoding failed; falling back to software decoding";
-        }
-    }
-    if (!videoFormat) {
-        videoFormat = enableVideoStream(false);
-    }
-    if (!videoFormat) {
-        qCritical() << "Failed to enable video stream" << m_videoStreamIndex;
-        m_mediaSource.reset();
-        m_videoStreamIndex = -1;
+    bool hwaccel = tryHw;
+    auto videoFormatOpt = enableVideoStream(hwaccel);
+    auto audioFormatOpt = enableAudioStream();
+
+    if (!videoFormatOpt && !audioFormatOpt) {
+        // 至少要有一个成功
+        qCritical() << "Failed to enable any stream";
         return;
     }
-    qInfo() << "Enabled video stream" << m_videoStreamIndex
-            << "decoder:" << (hwEnabled ? "D3D11VA hardware" : "software")
-            << "pixel format:" << pixelFormatName(*videoFormat);
+
+    // 启动解码前，先创建音频渲染器（不启动播放）
+    if (audioFormatOpt) {
+        AudioRenderer::Options audioOpts{};
+        audioOpts.sampleRate = audioSampleRate;
+        audioOpts.channels = audioChannels;
+        audioOpts.sampleFormat = *audioFormatOpt;
+        m_audioRenderer = AudioRenderer::create(audioOpts);
+        if (!m_audioRenderer) {
+            qCritical() << "Failed to create audio renderer";
+            return;
+        }
+    }
 
     auto startError = m_mediaSource->start();
     if (startError != media::StartError::None) {
         qCritical() << "Failed to start media source. " << QString::fromStdString(media::errToString(startError));
         m_mediaSource.reset();
         m_videoStreamIndex = -1;
+        m_audioStreamIndex = -1;
         return;
     }
 
@@ -140,17 +142,37 @@ void Controller::openFile(const QString& filePath, bool tryHw)
         QMutexLocker locker(&m_clock.mutex);
         reanchorClock(0, locker);
     }
+
+    m_audioPlayedUs = 0;
+    m_audioEnded = false;
+    m_pendingVideoFrame.reset();
+
+    if (m_audioRenderer) {
+        auto ret = m_audioRenderer->start([this] { return nextAudioFrame(); });
+        if (!ret) { // 概率很小
+            qCritical() << "Failed to start audio renderer";
+            // 停止解码
+            m_mediaSource->stop();
+            m_audioRenderer.reset();
+            return;
+        }
+    }
+
     m_lastVideoPts = 0;
     m_videoEnded = false;
     m_pendingVideoFrame.reset();
 
-    VideoSink::Options videoSinkOpts{};
-    videoSinkOpts.format = *videoFormat;
-    videoSinkOpts.width = videoWidth;
-    videoSinkOpts.height = videoHeight;
-    videoSinkOpts.hwaccel = hwEnabled;
-    videoSinkOpts.frameSource = [this] { return nextVideoFrame(); };
-    m_videoSink->start(videoSinkOpts);
+    if (videoFormatOpt) {
+        VideoSink::Options videoSinkOpts{};
+        videoSinkOpts.format = *videoFormatOpt;
+        videoSinkOpts.width = videoWidth;
+        videoSinkOpts.height = videoHeight;
+        videoSinkOpts.hwaccel = hwaccel;
+        videoSinkOpts.frameSource = [this] { return nextVideoFrame(); };
+        m_videoSink->start(videoSinkOpts);
+    }
+
+    
 
     setState(State::Playing);
 }
@@ -168,7 +190,9 @@ void Controller::stop()
 
     m_videoSink->stop();
     m_mediaSource->stop();
-    m_videoStreamIndex = -1; // 置为-1后，nextVideoFrame不会再访问m_mediaSource
+    m_videoStreamIndex = -1;
+    m_audioStreamIndex = -1;
+    m_audioRenderer.reset();
     m_mediaSource.reset();
 
     setState(State::Stopped);
@@ -278,6 +302,60 @@ view::Frame Controller::nextVideoFrame()
     return nullptr;
 }
 
+view::Frame Controller::nextAudioFrame()
+{
+    // 线程安全由启动顺序保证，在音频运行期间，本函数访问的成员不应被GUI线程修改
+    // 音频考虑到连续性，
+    // 门禁的处罚条件为pts与时钟相差超过200ms，
+    // 且只阻挡未到期的帧，不丢弃过期帧
+    // 典型的场景是视频开头的静音部分（第一帧的pts不是从0开始）
+    if (!m_pendingAudioFrame) {
+        m_pendingAudioFrame = m_mediaSource->nextFrame(m_audioStreamIndex);
+    }
+    if (!m_pendingAudioFrame) {
+        // 严重错误，mediaSource不应返回空指针
+        qCritical() << "Got null audio frame";
+        return nullptr;
+    }
+    if (m_pendingAudioFrame->type() == media::FrameType::Empty) {
+        m_pendingAudioFrame.reset();
+        return nullptr;
+    } else if (m_pendingAudioFrame->type() == media::FrameType::End) {
+        m_audioEnded = true;
+        QMetaObject::invokeMethod(this, [this]{ endOfStream(); }, Qt::QueuedConnection);
+        m_pendingAudioFrame.reset();
+        return nullptr;
+    }
+
+    int64_t mediaUs{0};
+    {
+        QMutexLocker locker(&m_clock.mutex);
+        mediaUs = currentMediaUs(locker);
+    }
+
+    auto pts = m_pendingAudioFrame->pts();
+    if (pts == MIN_INT64) {
+        // 无效的pts，按累加的时长算
+        pts = m_audioPlayedUs;
+    }
+    if (pts > mediaUs + 200000) {
+        // 达到门禁条件，先不播放
+        return nullptr;
+    }
+
+    m_audioPlayedUs += m_pendingAudioFrame->duration();
+
+    // 校准时钟
+    {
+        QMutexLocker locker(&m_clock.mutex);
+        // TODO: 以后需要获取更精确的播放位置锚定
+        reanchorClock(pts - 10000, locker);
+    }
+    auto ret = std::move(m_pendingAudioFrame);
+    m_pendingAudioFrame.reset();
+    return ret;
+}
+
 void Controller::reanchorClock(int64_t mediaUs, QMutexLocker<QMutex>& locker)
 {
     m_clock.anchorMediaUs = mediaUs;
@@ -291,41 +369,66 @@ int64_t Controller::currentMediaUs(QMutexLocker<QMutex>& locker)
 
 void Controller::endOfStream()
 {
-    if (m_videoEnded /*&& m_audioEnded*/) {
+    if (m_videoEnded && m_audioEnded) {
+        qInfo() << "End of stream";
         stop();
     }
 }
 
-std::optional<media::PixelFormat> Controller::enableVideoStream(bool hw)
+std::optional<view::PixelFormat> Controller::enableVideoStream(bool& hw)
 {
-    if (hw) {
-#ifdef _WIN32
-        auto* device = m_videoSink->device();
-        if (!device) {
-            qWarning() << "No hardware decoding device";
-            return std::nullopt;
-        }
-        auto enableExp = m_mediaSource->enableVideoStream(m_videoStreamIndex, {}, true, device);
-        if (!enableExp) {
-            auto err = enableExp.error();
-            qWarning() << "Failed to enable video stream with hwaccel. " << QString::fromStdString(media::errToString(err));
-            return std::nullopt;
-        }
-        return enableExp.value();
-#else
-        qWarning() << "Hardware decoding is not supported on this platform";
+    if (m_videoStreamIndex < 0) return std::nullopt;
+    if (!m_videoSink) {
+        qCritical() << "No video sink";
         return std::nullopt;
-#endif
-    } else {
-        using enum media::PixelFormat;
-        auto enableExp = m_mediaSource->enableVideoStream(m_videoStreamIndex, {Yuv420p, Yuv420p10le});
-        if (!enableExp) {
-            auto err = enableExp.error();
-            qCritical() << "Failed to enable video stream with sw. " << QString::fromStdString(media::errToString(err));
-            return std::nullopt;
-        }
-        return enableExp.value();
     }
+    if (hw) { // 先尝试硬解
+#ifdef _WIN32
+        auto* context = m_videoSink->device();
+        if (context) {
+            auto formatExp = m_mediaSource->enableVideoStream(m_videoStreamIndex, {}, true, context);
+            if (formatExp && (formatExp.value() == media::PixelFormat::Nv12 || formatExp.value() == media::PixelFormat::P010le)) {
+                hw = true;
+                return formatExp.value();
+            } else if (formatExp) {
+                qWarning() << "Unsupported hw format";
+                m_mediaSource->disableStream(m_videoStreamIndex);
+            } else {
+                qWarning() << "Enable hw decode failed. Use software decode";
+            }
+        } else {
+            qWarning() << "No video context. Use software decode";
+        }
+#endif
+    }
+
+    auto formatExp = m_mediaSource->enableVideoStream(m_videoStreamIndex, {media::PixelFormat::Yuv420p, media::PixelFormat::Yuv420p10le});
+    if (!formatExp) {
+        qCritical() << "Enable video stream failed";
+        return std::nullopt;
+    }
+
+    if (formatExp.value() != media::PixelFormat::Yuv420p && formatExp.value() != media::PixelFormat::Yuv420p10le) {
+        qWarning() << "Unexpected format";
+        return std::nullopt;
+    }
+    hw = false;
+    return formatExp.value();
+}
+
+std::optional<view::SampleFormat> Controller::enableAudioStream()
+{
+    if (m_audioStreamIndex < 0) return std::nullopt;
+    auto formatExp = m_mediaSource->enableAudioStream(m_audioStreamIndex, {media::SampleFormat::Flt});
+    if (!formatExp) {
+        qCritical() << "Enable audio stream failed";
+        return std::nullopt;
+    }
+    if (formatExp.value() != media::SampleFormat::Flt) {
+        qWarning() << "Unexpected audio format";
+        return std::nullopt;
+    }
+    return formatExp.value();
 }
 
 } // namespace view

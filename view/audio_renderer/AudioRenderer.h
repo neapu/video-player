@@ -5,12 +5,13 @@
 #include "media/IMediaFrame.h"
 
 namespace view {
+using SampleFormat = media::SampleFormat;
 class AudioRenderer {
 public:
     struct Options {
         int sampleRate{44100};
         int channels{2};
-        media::SampleFormat sampleFormat{media::SampleFormat::Flt};
+        SampleFormat sampleFormat{SampleFormat::Flt};
         float volume{1.0f};
     };
 

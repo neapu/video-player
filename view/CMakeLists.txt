@@ -26,6 +26,7 @@ target_link_libraries(${EXE_NAME} PRIVATE
     media
     # gl_video_renderer
     rhi_video_renderer
+    audio_renderer
 )
 
 if (WIN32)
