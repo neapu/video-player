@@ -33,6 +33,9 @@ public:
     void setState(State state);
     State state() const;
 
+    int volume() const { return m_volume; }
+    void setVolume(int volume);
+
 private:
     // 不阻塞，不渲染时返回nullptr，不会返回控制帧
     view::Frame nextVideoFrame();
@@ -74,6 +77,8 @@ private:
         int64_t anchorSteadyUs{0}; // 记录媒体时间时的参考时间
         int64_t anchorMediaUs{0};
     } m_clock;
+
+    int m_volume{100};
 };
 
 } // namespace view

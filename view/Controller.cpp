@@ -217,6 +217,14 @@ Controller::State Controller::state() const
     return m_state;
 }
 
+void Controller::setVolume(int volume)
+{
+    m_volume = volume;
+    if (m_audioRenderer) {
+        m_audioRenderer->setVolume(static_cast<float>(m_volume) / 100);
+    }
+}
+
 view::Frame Controller::nextVideoFrame()
 {
     if (m_videoStreamIndex == -1) {
