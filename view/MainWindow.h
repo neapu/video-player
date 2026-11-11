@@ -1,6 +1,7 @@
 #pragma once
 #include <QMainWindow>
 #include <QProgressBar>
+#include <QPushButton>
 #include "rhi_video_renderer/QRhiVideoRenderer.h"
 #include "Controller.h"
 

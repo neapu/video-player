@@ -36,6 +36,23 @@
         "cacheVariables": {
             "CMAKE_BUILD_TYPE": "Debug"
         }
+    },{
+        "name": "Linux-Release",
+        "hidden": false,
+        "generator": "Ninja",
+        "binaryDir": "${sourceDir}/build/${presetName}",
+        "cacheVariables": {
+            "CMAKE_BUILD_TYPE": "Release",
+            "CMAKE_RUNTIME_OUTPUT_DIRECTORY": "${sourceDir}/bin",
+            "CMAKE_PREFIX_PATH": "$env{Qt6_DIR}/lib/cmake"
+        }
+    },{
+        "name": "Linux-Debug",
+        "inherits": "Linux-Release",
+        "hidden": false,
+        "cacheVariables": {
+            "CMAKE_BUILD_TYPE": "Debug"
+        }
     }],
     "buildPresets": [{
         "name": "Win64-Release",
@@ -54,6 +71,14 @@
     },{
         "name": "MacOS-Debug",
         "configurePreset": "MacOS-Debug",
+        "configuration": "Debug"
+    },{
+        "name": "Linux-Release",
+        "configurePreset": "Linux-Release",
+        "configuration": "Release"
+    },{
+        "name": "Linux-Debug",
+        "configurePreset": "Linux-Debug",
         "configuration": "Debug"
     }]
 }
