@@ -72,6 +72,7 @@ void MainWindow::createMenu()
 
 void MainWindow::onVideoRendererInitialized()
 {
+    m_videoRenderer->clear();
     if (!m_initialFilePath.isEmpty()) {
         openFile(m_initialFilePath);
         m_initialFilePath.clear();

@@ -182,13 +182,6 @@ void QRhiVideoRenderer::render(QRhiCommandBuffer* cb)
         return;
     }
 
-    if (!m_frameSource) {
-        qCritical() << "No frame source.";
-        emit errorOccured("No frame source.");
-        m_running = false;
-        return;
-    }
-
     if (m_clearFlag) {
         m_clearFlag = false;
         auto* rub = m_rhi->nextResourceUpdateBatch();
@@ -197,6 +190,15 @@ void QRhiVideoRenderer::render(QRhiCommandBuffer* cb)
         if (m_running) update();
         return;
     }
+
+    if (!m_frameSource) {
+        qCritical() << "No frame source.";
+        emit errorOccured("No frame source.");
+        m_running = false;
+        return;
+    }
+
+    
 
     auto frame = m_frameSource();
     if (!frame) {
