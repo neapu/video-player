@@ -46,18 +46,42 @@ QMatrix4x4 createVertexTransformMatrix(const QSize& frameSize, const QSize& view
 }
 
 // 色彩范围转换矩阵，用于将limited range的YUV转换为full range的RGB
-QMatrix4x4 createColorRangeConversionMatrix(view::ColorRange colorRange)
+// 采样值要先乘sampleScale还原成像素整数电平，再按位深对应的参考电平(黑位/量程/色度中心)换算：
+// - Yuv420p/Nv12(R8纹理)：采样值已是[0,1]，乘255还原8bit电平；
+// - Yuv420p10le(软解，数据在16bit字的低10位)：R16纹理按65535归一化，乘65535还原10bit电平；
+// - P010le(硬解，数据在16bit字的高10位)：采样值∈[0,1023*64/65535]，乘65535/64还原10bit电平。
+// 若对Yuv420p10le沿用8bit系数，亮度只有真实值的1/64且U/V中性点(512)被当成0，
+// 画面会严重偏暗偏绿
+QMatrix4x4 createColorRangeConversionMatrix(view::ColorRange colorRange, view::PixelFormat pixelFormat)
 {
-    static const QMatrix4x4 limitedRange{
-        255.0f / 219.0f, 0.0f,          0.0f,           -16.0f / 219.0f,
-        0.0f,           255.0f / 224.0f, 0.0f,          -128.0f / 224.0f,
-        0.0f,           0.0f,           255.0f / 224.0f, -128.0f / 224.0f,
+    float sampleScale = 255.0f; // 采样值 → 像素整数电平
+    float multiplier = 1.0f;    // 位深比例：10bit参考电平是8bit的4倍
+    float fullScale = 255.0f;   // full range满幅电平
+    if (pixelFormat == view::PixelFormat::Yuv420p10le) {
+        sampleScale = 65535.0f;
+        multiplier = 4.0f;
+        fullScale = 1023.0f;
+    } else if (pixelFormat == view::PixelFormat::P010le) {
+        sampleScale = 65535.0f / 64.0f;
+        multiplier = 4.0f;
+        fullScale = 1023.0f;
+    }
+
+    const float yBlack = 16.0f * multiplier;    // limited range亮度黑位：8bit=16, 10bit=64
+    const float ySpan = 219.0f * multiplier;    // limited range亮度量程：8bit=219, 10bit=876
+    const float cCenter = 128.0f * multiplier;  // 色度中性点：8bit=128, 10bit=512
+    const float cSpan = 224.0f * multiplier;    // limited range色度量程：8bit=224, 10bit=896
+
+    const QMatrix4x4 limitedRange{
+        sampleScale / ySpan, 0.0f, 0.0f,          -yBlack / ySpan,
+        0.0f,           sampleScale / cSpan, 0.0f, -cCenter / cSpan,
+        0.0f,           0.0f,           sampleScale / cSpan, -cCenter / cSpan,
         0.0f,           0.0f,           0.0f,            1.0f
     };
-    static const QMatrix4x4 fullRange{
-        1.0f, 0.0f, 0.0f, 0.0f,
-        0.0f, 1.0f, 0.0f, -128.0f / 255.0f,
-        0.0f, 0.0f, 1.0f, -128.0f / 255.0f,
+    const QMatrix4x4 fullRange{
+        sampleScale / fullScale, 0.0f, 0.0f, 0.0f,
+        0.0f, sampleScale / fullScale, 0.0f, -cCenter / fullScale,
+        0.0f, 0.0f, sampleScale / fullScale, -cCenter / fullScale,
         0.0f, 0.0f, 0.0f, 1.0f
     };
 
@@ -302,7 +326,7 @@ void QRhiVideoRenderer::renderFrame(QRhiCommandBuffer* cb, Frame&& frame)
     QSize renderSize = renderTarget()->pixelSize();
     QSize frameSize{format.width, format.height};
     QMatrix4x4 vertexTransformMatrix = createVertexTransformMatrix(frameSize, renderSize);
-    QMatrix4x4 colorRangeConversionMatrix = createColorRangeConversionMatrix(format.colorRange);
+    QMatrix4x4 colorRangeConversionMatrix = createColorRangeConversionMatrix(format.colorRange, format.pixelFormat);
     QMatrix4x4 yuvToRGBMatrix = createYUVtoRGBMatrix(format.colorSpace);
 
     auto* rub = m_rhi->nextResourceUpdateBatch();

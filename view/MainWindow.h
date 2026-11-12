@@ -1,6 +1,6 @@
 #pragma once
 #include <QMainWindow>
-#include <QProgressBar>
+#include <QSlider>
 #include <QPushButton>
 #include "rhi_video_renderer/QRhiVideoRenderer.h"
 #include "Controller.h"
@@ -35,8 +35,8 @@ private:
     QRhiVideoRenderer* m_videoRenderer{nullptr};
 
     Controller* m_controller{nullptr};
-    QProgressBar* m_playbackBar{nullptr};
-    QProgressBar* m_volumeBar{nullptr};
+    QSlider* m_playbackBar{nullptr};
+    QSlider* m_volumeBar{nullptr};
 
     QPushButton* m_playButton{nullptr};
     QPushButton* m_stopButton{nullptr};

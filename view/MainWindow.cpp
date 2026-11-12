@@ -47,12 +47,13 @@ void MainWindow::createCentralWidget()
     auto* bar1 = new QHBoxLayout(central);
     bar1->setSpacing(5);
     bar1->setContentsMargins(5, 5, 5, 5);
-    m_playbackBar = new QProgressBar(central);
+    m_playbackBar = new QSlider(Qt::Horizontal, central);
     bar1->addWidget(m_playbackBar, 1);
-    m_volumeBar = new QProgressBar(central);
+    m_volumeBar = new QSlider(Qt::Horizontal, central);
     m_volumeBar->setMaximumWidth(100);
     m_volumeBar->setMinimumWidth(100);
     m_volumeBar->setMaximum(100);
+    m_volumeBar->setMinimum(0);
     m_volumeBar->setValue(100);
     bar1->addWidget(m_volumeBar);
     layout->addLayout(bar1);
