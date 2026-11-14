@@ -30,6 +30,8 @@ MainWindow::MainWindow(const Options &options, QWidget* parent)
 
     m_controller = new Controller(this);
     m_controller->setVideoSink(m_videoRenderer);
+
+    connect(m_controller, &Controller::stateChanged, this, &MainWindow::onPlayStateChanged);
 }
 
 MainWindow::~MainWindow()
@@ -44,6 +46,7 @@ void MainWindow::openFile(const QString &filePath)
     }
 
     m_controller->openFile(filePath, m_hwaccel);
+
 }
 
 void MainWindow::createCentralWidget()
@@ -62,6 +65,7 @@ void MainWindow::createCentralWidget()
     bar1->setSpacing(5);
     bar1->setContentsMargins(5, 5, 5, 5);
     m_playbackBar = new QSlider(Qt::Horizontal, central);
+    m_playbackBar->setEnabled(false);
     bar1->addWidget(m_playbackBar, 1);
     m_volumeBar = new QSlider(Qt::Horizontal, central);
     m_volumeBar->setMaximumWidth(100);
@@ -83,6 +87,8 @@ void MainWindow::createCentralWidget()
     bar2->addStretch();
 
     connect(m_videoRenderer, &QRhiVideoRenderer::initialized, this, &MainWindow::onVideoRendererInitialized, Qt::QueuedConnection);
+    connect(m_playButton, &PlayOrPauseButton::clicked, this, &MainWindow::onPlayOrPauseButtonClicked);
+    connect(m_stopButton, &QPushButton::clicked, this, &MainWindow::onStopButtonClicked);
 }
 
 void MainWindow::createMenu()
@@ -93,6 +99,24 @@ void MainWindow::createMenu()
 
     connect(openAct, &QAction::triggered, this, &MainWindow::onOpenTriggered);
     connect(exitAct, &QAction::triggered, this, &QMainWindow::close);
+}
+
+void MainWindow::onPlayStateChanged(Controller::State state)
+{
+    qDebug() << "State changed" << static_cast<int>(state);
+    switch (state) {
+    case Controller::State::Playing:
+        m_playButton->setPlaying(true);
+        m_playbackBar->setEnabled(true);
+        break;
+    case Controller::State::Paused:
+        m_playButton->setPlaying(false);
+        break;
+    case Controller::State::Stopped:
+        m_playButton->setPlaying(false);
+        m_playbackBar->setEnabled(false);
+        break;
+    }
 }
 
 void MainWindow::onVideoRendererInitialized()
@@ -113,4 +137,17 @@ void MainWindow::onOpenTriggered()
     qInfo() << "Opening" << fileName;
     openFile(fileName);
 }
+
+void MainWindow::onPlayOrPauseButtonClicked()
+{
+    m_controller->pauseOrResume();
+}
+
+void MainWindow::onStopButtonClicked()
+{
+    m_controller->stop();
+    // 主动停止的，清屏
+    m_videoRenderer->clear();
+}
+
 } // namespace view

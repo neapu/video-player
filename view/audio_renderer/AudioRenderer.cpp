@@ -120,6 +120,16 @@ void AudioRenderer::stop()
     ma_device_stop(&m_device);
 }
 
+void AudioRenderer::pause()
+{
+    ma_device_stop(&m_device);
+}
+
+void AudioRenderer::resume()
+{
+    ma_device_start(&m_device);
+}
+
 void AudioRenderer::setVolume(float volume)
 {
     m_volume = volume;

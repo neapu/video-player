@@ -120,6 +120,18 @@ void QRhiVideoRenderer::start(const Options& opts)
     m_running = true;
     update();
 }
+
+void QRhiVideoRenderer::pause()
+{
+    m_running = false;
+}
+
+void QRhiVideoRenderer::resume()
+{
+    m_running = true;
+    update();
+}
+
 void QRhiVideoRenderer::stop()
 {
     m_frameSource = nullptr;
@@ -223,7 +235,7 @@ void QRhiVideoRenderer::render(QRhiCommandBuffer* cb)
     }
 
     
-
+    if (!m_running) return;
     auto frame = m_frameSource();
     if (!frame) {
         if (m_running) update();

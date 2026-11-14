@@ -13,6 +13,8 @@ public:
 
     void start(const Options& opts) override;
     void stop() override;
+    void pause() override;
+    void resume() override;
     void clear() override;
 
 #ifdef _WIN32

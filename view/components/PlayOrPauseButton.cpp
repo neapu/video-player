@@ -20,6 +20,7 @@ void PlayOrPauseButton::setPlaying(bool playing)
 {
     m_playing = playing;
     m_icon = QIcon(m_playing ? ":/icons/pause.svg" : ":/icons/play.svg");
+    setIcon(m_icon);
 }
 
 } // view namespace

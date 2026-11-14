@@ -27,6 +27,8 @@ public:
     virtual ~VideoSink() = default;
     virtual void start(const Options& opts) = 0;
     virtual void stop() = 0;
+    virtual void pause() = 0;
+    virtual void resume() = 0;
     virtual void clear() {}
 
 #ifdef _WIN32

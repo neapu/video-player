@@ -26,8 +26,11 @@ private:
     void createMenu();
 
 private slots:
+    void onPlayStateChanged(Controller::State state);
     void onVideoRendererInitialized();
     void onOpenTriggered();
+    void onPlayOrPauseButtonClicked();
+    void onStopButtonClicked();
 
 private:
     QString m_initialFilePath;

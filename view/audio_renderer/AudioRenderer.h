@@ -24,6 +24,8 @@ public:
     bool start(std::function<media::MediaFramePtr()> frameSource,
                std::function<void(int64_t audibleMediaUs)> positionCallback = nullptr);
     void stop();
+    void pause();
+    void resume();
 
     // 取值 0.0 ~ 1.0
     void setVolume(float volume);

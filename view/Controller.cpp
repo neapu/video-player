@@ -185,7 +185,25 @@ void Controller::openFile(const QString& filePath, bool tryHw)
 
 void Controller::pauseOrResume()
 {
-    // Implement pause or resume logic here
+    if (state() == State::Playing) {
+        {
+            QMutexLocker locker(&m_clock.mutex);
+            auto mediaUs = currentMediaUs(locker);
+            reanchorClock(mediaUs, locker);
+        }
+        m_videoSink->pause();
+        if (m_audioRenderer) m_audioRenderer->pause();
+        setState(State::Paused);
+    } else if (state() == State::Paused) {
+        // media 时间不变，将 anchorSteadyUs 改为现在
+        {
+            QMutexLocker locker(&m_clock.mutex);
+            m_clock.anchorSteadyUs = steadyClockUs();
+        }
+        m_videoSink->resume();
+        if (m_audioRenderer) m_audioRenderer->resume();
+        setState(State::Playing);
+    }
 }
 
 void Controller::stop()
@@ -209,6 +227,7 @@ void Controller::setState(State state)
     // 目前对状态的访问都在GUI线程，先不加锁，以后看情况加
     // QMutexLocker lock(&m_stateMutex);
     m_state = state;
+    emit stateChanged(state);
 }
 
 Controller::State Controller::state() const

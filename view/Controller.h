@@ -36,6 +36,9 @@ public:
     int volume() const { return m_volume; }
     void setVolume(int volume);
 
+signals:
+    void stateChanged(State state);
+
 private:
     // 不阻塞，不渲染时返回nullptr，不会返回控制帧
     view::Frame nextVideoFrame();
