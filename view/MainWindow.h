@@ -2,6 +2,7 @@
 #include <QMainWindow>
 #include <QSlider>
 #include <QPushButton>
+#include <QLabel>
 #include "rhi_video_renderer/QRhiVideoRenderer.h"
 #include "Controller.h"
 #include "components/PlayOrPauseButton.h"
@@ -31,6 +32,7 @@ private slots:
     void onOpenTriggered();
     void onPlayOrPauseButtonClicked();
     void onStopButtonClicked();
+    void onPositionChanged(int64_t pos);
 
 private:
     QString m_initialFilePath;
@@ -44,6 +46,8 @@ private:
 
     PlayOrPauseButton* m_playButton{nullptr};
     QPushButton* m_stopButton{nullptr};
+    QLabel* m_timeLabel{nullptr};
+    QString m_durationStr{};
     
 };
 } // namespace view

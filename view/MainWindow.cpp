@@ -15,6 +15,13 @@ QPushButton* createIconButton(const QIcon& icon, const QString& toolTip, QWidget
     return btn;
 }
 
+QString timeToStr(int64_t us)
+{
+    int64_t min = us / 60000000;
+    int64_t sec = (us / 1000000) % 60;
+    return QString("%1:%2").arg(min).arg(sec, 2, 10, QChar('0'));
+}
+
 }
 
 namespace view {
@@ -32,6 +39,7 @@ MainWindow::MainWindow(const Options &options, QWidget* parent)
     m_controller->setVideoSink(m_videoRenderer);
 
     connect(m_controller, &Controller::stateChanged, this, &MainWindow::onPlayStateChanged);
+    connect(m_controller, &Controller::positionChanged, this, &MainWindow::onPositionChanged);
 }
 
 MainWindow::~MainWindow()
@@ -46,7 +54,13 @@ void MainWindow::openFile(const QString &filePath)
     }
 
     m_controller->openFile(filePath, m_hwaccel);
-
+    auto duration = m_controller->duration();
+    if (duration > 0) {
+        m_playbackBar->setMaximum(duration);
+        m_playbackBar->setValue(0);
+        m_durationStr = timeToStr(duration);
+        m_timeLabel->setText(QString("0:00/%1").arg(m_durationStr));
+    }
 }
 
 void MainWindow::createCentralWidget()
@@ -59,7 +73,7 @@ void MainWindow::createCentralWidget()
     auto* layout = new QVBoxLayout(central);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
-    layout->addWidget(m_videoRenderer);
+    layout->addWidget(m_videoRenderer, 1);
 
     auto* bar1 = new QHBoxLayout(central);
     bar1->setSpacing(5);
@@ -85,6 +99,8 @@ void MainWindow::createCentralWidget()
     m_stopButton = createIconButton(QIcon(":/icons/stop.svg"), tr("Stop"), central);
     bar2->addWidget(m_stopButton);
     bar2->addStretch();
+    m_timeLabel = new QLabel("00:00", central);
+    bar2->addWidget(m_timeLabel);
 
     connect(m_videoRenderer, &QRhiVideoRenderer::initialized, this, &MainWindow::onVideoRendererInitialized, Qt::QueuedConnection);
     connect(m_playButton, &PlayOrPauseButton::clicked, this, &MainWindow::onPlayOrPauseButtonClicked);
@@ -115,6 +131,7 @@ void MainWindow::onPlayStateChanged(Controller::State state)
     case Controller::State::Stopped:
         m_playButton->setPlaying(false);
         m_playbackBar->setEnabled(false);
+        m_playbackBar->setValue(0);
         break;
     }
 }
@@ -148,6 +165,12 @@ void MainWindow::onStopButtonClicked()
     m_controller->stop();
     // 主动停止的，清屏
     m_videoRenderer->clear();
+}
+
+void MainWindow::onPositionChanged(int64_t pos)
+{
+    m_playbackBar->setValue(pos);
+    m_timeLabel->setText(QString("%1/%2").arg(timeToStr(pos)).arg(m_durationStr));
 }
 
 } // namespace view

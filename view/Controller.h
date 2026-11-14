@@ -36,8 +36,11 @@ public:
     int volume() const { return m_volume; }
     void setVolume(int volume);
 
+    int64_t duration() const;
+
 signals:
     void stateChanged(State state);
+    void positionChanged(int64_t pos);
 
 private:
     // 不阻塞，不渲染时返回nullptr，不会返回控制帧

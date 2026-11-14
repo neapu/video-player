@@ -152,6 +152,7 @@ void Controller::openFile(const QString& filePath, bool tryHw)
             [this] { return nextAudioFrame(); },
             // 音频回调线程触发，按可听位置校准时钟
             [this](int64_t audibleUs) {
+                emit positionChanged(audibleUs);
                 QMutexLocker locker(&m_clock.mutex);
                 reanchorClock(audibleUs, locker);
             });
@@ -244,6 +245,11 @@ void Controller::setVolume(int volume)
     }
 }
 
+int64_t Controller::duration() const
+{
+    return m_mediaSource ? m_mediaSource->duration() : 0;
+}
+
 view::Frame Controller::nextVideoFrame()
 {
     if (m_videoStreamIndex == -1) {
@@ -327,7 +333,8 @@ view::Frame Controller::nextVideoFrame()
 
         // 当前帧是队列中最新的已到期帧，上屏
         m_videoPlayedUs += frameIntervalUs;     // 上屏或丢弃时才累计，不然下一次请求的是同一帧，会重复累计
-        {
+        if (!m_audioRenderer) {
+            emit positionChanged(mediaUs);
             QMutexLocker locker(&m_clock.mutex);
             reanchorClock(mediaUs, locker);
         }
