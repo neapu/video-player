@@ -4,6 +4,7 @@
 #include <QPushButton>
 #include "rhi_video_renderer/QRhiVideoRenderer.h"
 #include "Controller.h"
+#include "components/PlayOrPauseButton.h"
 
 namespace view {
 
@@ -38,7 +39,7 @@ private:
     QSlider* m_playbackBar{nullptr};
     QSlider* m_volumeBar{nullptr};
 
-    QPushButton* m_playButton{nullptr};
+    PlayOrPauseButton* m_playButton{nullptr};
     QPushButton* m_stopButton{nullptr};
     
 };

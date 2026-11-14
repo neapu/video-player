@@ -2,8 +2,22 @@
 #include <QVBoxLayout>
 #include <QMenuBar>
 #include <QFileDialog>
-namespace view {
 
+namespace {
+QPushButton* createIconButton(const QIcon& icon, const QString& toolTip, QWidget* parent = nullptr)
+{
+    auto* btn = new QPushButton(parent);
+    btn->setIcon(icon);
+    btn->setIconSize(QSize(18, 18));
+    btn->setFixedSize(QSize(32, 32));
+    btn->setToolTip(toolTip);
+    btn->setFocusPolicy(Qt::NoFocus);
+    return btn;
+}
+
+}
+
+namespace view {
 MainWindow::MainWindow(const Options &options, QWidget* parent) 
     : QMainWindow(parent)
     , m_initialFilePath(options.initialFilePath)
@@ -57,6 +71,16 @@ void MainWindow::createCentralWidget()
     m_volumeBar->setValue(100);
     bar1->addWidget(m_volumeBar);
     layout->addLayout(bar1);
+
+    auto* bar2 = new QHBoxLayout(central);
+    layout->addLayout(bar2);
+    bar2->setSpacing(5);
+    bar2->setContentsMargins(5, 5, 5, 5);
+    m_playButton = new PlayOrPauseButton(central);
+    bar2->addWidget(m_playButton);
+    m_stopButton = createIconButton(QIcon(":/icons/stop.svg"), tr("Stop"), central);
+    bar2->addWidget(m_stopButton);
+    bar2->addStretch();
 
     connect(m_videoRenderer, &QRhiVideoRenderer::initialized, this, &MainWindow::onVideoRendererInitialized, Qt::QueuedConnection);
 }

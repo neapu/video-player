@@ -13,6 +13,18 @@ qt_add_executable(${EXE_NAME}
     LogManager.h
     LogManager.cpp
     VideoSink.h
+
+    components/PlayOrPauseButton.h
+    components/PlayOrPauseButton.cpp
+)
+
+qt_add_resources(${EXE_NAME} "player_icons"
+    PREFIX "/icons"
+    BASE "images"
+    FILES 
+        images/play.svg
+        images/pause.svg
+        images/stop.svg
 )
 
 # add_subdirectory(gl_video_renderer)
