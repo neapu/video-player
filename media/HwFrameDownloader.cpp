@@ -1,25 +1,26 @@
-#include "D3D11FrameDownloader.h"
-#ifdef _WIN32
+#include "HwFrameDownloader.h"
 #include "ffmpeg_helper/FFmpegError.h"
 
 extern "C" {
 #include <libavutil/hwcontext.h>
+#include <libavutil/pixdesc.h>
 }
 
 namespace media {
-D3D11FrameDownloader::D3D11FrameDownloader(const Options& opts)
+HwFrameDownloader::HwFrameDownloader(const Options& opts)
     : m_logger(opts.logger)
 {
 }
 
-fh::FramePtr D3D11FrameDownloader::process(const fh::FramePtr& frame)
+fh::FramePtr HwFrameDownloader::process(const fh::FramePtr& frame)
 {
     if (!frame) {
         LOG_ERROR(m_logger, "Cannot download a null video frame");
         return nullptr;
     }
-    if (frame->format != AV_PIX_FMT_D3D11 || !frame->hw_frames_ctx) {
-        LOG_ERROR(m_logger, "Video frame is not a D3D11 hardware frame");
+    const auto* desc = av_pix_fmt_desc_get(static_cast<AVPixelFormat>(frame->format));
+    if (!desc || !(desc->flags & AV_PIX_FMT_FLAG_HWACCEL) || !frame->hw_frames_ctx) {
+        LOG_ERROR(m_logger, "Video frame is not a hardware frame");
         return nullptr;
     }
 
@@ -29,11 +30,11 @@ fh::FramePtr D3D11FrameDownloader::process(const fh::FramePtr& frame)
         return nullptr;
     }
 
-    // 内部创建 staging 纹理回读，输出帧自动为硬件帧池 sw_format 的 CPU 帧；
-    // 同步执行（Map 阻塞等待 GPU 拷贝完成），运行于解码线程
+    // 内部走平台相应的回读实现（D3D11 为 staging 纹理），输出帧自动为硬件帧池 sw_format 的 CPU 帧；
+    // 同步执行（阻塞等待 GPU 拷贝完成），运行于解码线程
     int ret = av_hwframe_transfer_data(output.get(), frame.get(), 0);
     if (ret < 0) {
-        LOG_ERROR(m_logger, "Failed to download D3D11 frame: {}", fh::err2str(ret));
+        LOG_ERROR(m_logger, "Failed to download hardware frame: {}", fh::err2str(ret));
         return nullptr;
     }
 
@@ -48,4 +49,3 @@ fh::FramePtr D3D11FrameDownloader::process(const fh::FramePtr& frame)
     return output;
 }
 } // namespace media
-#endif

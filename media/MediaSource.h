@@ -20,7 +20,7 @@ public:
         int streamIndex,
         std::vector<PixelFormat> requirePixelFormats,
         VideoDecodeMode decodeMode = VideoDecodeMode::Software,
-        void* hardwareContext = nullptr
+        int decodeAdapterIndex = -1
     ) override;
     std::expected<SampleFormat, StreamError> enableAudioStream(
         int streamIndex,
@@ -41,7 +41,7 @@ private:
     MediaSource(const Options& options);
     CreateError initialize();
 
-    std::unique_ptr<Decoder> createDecoder(const AVStream* stream, bool hwaccel = false, void* hwctx = nullptr);
+    std::unique_ptr<Decoder> createDecoder(const AVStream* stream, bool hwaccel = false, int adapterIndex = -1);
     DecodeWorkerPtr createVideoDecodeWorker(const AVStream* stream, std::unique_ptr<Decoder>&& decoder, std::vector<FrameProcessorPtr> processors);
     DecodeWorkerPtr createAudioDecodeWorker(const AVStream* stream, std::unique_ptr<Decoder>&& decoder, std::vector<FrameProcessorPtr> processors);
     // CPU 帧格式协商：探测帧格式在请求列表中→不追加处理器；

@@ -34,8 +34,9 @@ public:
     virtual void refresh() {}
 
 #ifdef _WIN32
-    virtual ID3D11Device* device() { return nullptr; };
-    virtual ID3D11DeviceContext* context() { return nullptr; }
+    // 渲染设备所在适配器的 LUID（指向 DXGI_LUID，随 VideoSink 生命周期有效）；
+    // 渲染器无 D3D11 设备时返回 nullptr。用于 media 层的同 GPU 探测与解码 GPU 自动选择
+    virtual void* adapterLuid() { return nullptr; }
 #endif
 };
 } // namespace view

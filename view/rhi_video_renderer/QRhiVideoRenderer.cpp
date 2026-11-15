@@ -1,6 +1,9 @@
 #include "QRhiVideoRenderer.h"
 #include <QDebug>
 #include <QFile>
+#ifdef _WIN32
+#include <dxgi.h>
+#endif
 
 namespace {
 QShader loadShader(const QString& path)
@@ -182,16 +185,21 @@ void QRhiVideoRenderer::initialize(QRhiCommandBuffer* cb)
         auto* device = static_cast<ID3D11Device*>(nativeHandle->dev);
         auto* context = static_cast<ID3D11DeviceContext*>(nativeHandle->context);
 
-        // 启用多线程支持
-        Microsoft::WRL::ComPtr<ID3D10Multithread> mt;
-        if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&mt)))) {
-            mt->SetMultithreadProtected(TRUE);
-            m_device = device;
-            m_context = context;
-        } else {
-            // 回退到渲染软件帧模式，不赋值m_d3d11Device和m_d3d11DeviceContext
-            qWarning()
-                << "Failed to enable multithread protection for D3D11 device. Falling back to software rendering mode.";
+        // 解码已改用 media 内部自建的 D3D11 设备，QRhi 设备只在渲染线程使用
+        // （帧循环与本渲染器的跨设备拷贝），单线程无并发，无需 SetMultithreadProtected
+        m_device = device;
+        m_context = context;
+        // 记录渲染设备所在适配器 LUID，供 media 层做同 GPU 探测与解码 GPU 自动选择
+        Microsoft::WRL::ComPtr<IDXGIDevice> dxgiDevice;
+        Microsoft::WRL::ComPtr<IDXGIAdapter> adapter;
+        DXGI_ADAPTER_DESC desc{};
+        if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&dxgiDevice)))
+            && SUCCEEDED(dxgiDevice->GetAdapter(adapter.GetAddressOf()))
+            && SUCCEEDED(adapter->GetDesc(&desc))) {
+            m_adapterLuid = desc.AdapterLuid;
+            m_adapterLuidValid = true;
+            qInfo() << "Render adapter LUID:" << Qt::hex
+                    << static_cast<quint32>(desc.AdapterLuid.HighPart) << desc.AdapterLuid.LowPart;
         }
     }
 #endif

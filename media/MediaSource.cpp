@@ -5,14 +5,65 @@
 #include "SwsConvertor.h"
 #include "SwrConvertor.h"
 #include "DecodeProbe.h"
+#include "HwFrameDownloader.h"
 #ifdef _WIN32
-#include "D3D11FrameDownloader.h"
+#include <dxgi.h>
+#include <wrl/client.h>
+#include <vector>
 #endif
 
 namespace media {
 std::expected<std::unique_ptr<IMediaSource>, CreateError> IMediaSource::create(const Options& options)
 {
     return MediaSource::create(options);
+}
+
+std::vector<GpuInfo> IMediaSource::enumerateGpus()
+{
+    std::vector<GpuInfo> gpus{};
+#ifdef _WIN32
+    Microsoft::WRL::ComPtr<IDXGIFactory1> factory;
+    if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(factory.GetAddressOf())))) {
+        return gpus;
+    }
+    int index = 0;
+    for (UINT i = 0; ; i++) {
+        Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter;
+        if (factory->EnumAdapters1(i, adapter.GetAddressOf()) == DXGI_ERROR_NOT_FOUND) {
+            break;
+        }
+        DXGI_ADAPTER_DESC1 desc{};
+        adapter->GetDesc1(&desc);
+        if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) {
+            continue;
+        }
+        GpuInfo info{};
+        info.index = index++;
+        for (const auto* c = desc.Description; *c != L'\0'; ++c) {
+            info.name.push_back(static_cast<char>(*c));
+        }
+        info.luidHigh = desc.AdapterLuid.HighPart;
+        info.luidLow = desc.AdapterLuid.LowPart;
+        gpus.push_back(std::move(info));
+    }
+#endif
+    return gpus;
+}
+
+int IMediaSource::gpuIndexByAdapterLuid(const void* adapterLuid)
+{
+#ifdef _WIN32
+    if (!adapterLuid) {
+        return -1;
+    }
+    auto* luid = static_cast<const LUID*>(adapterLuid);
+    for (const auto& gpu : enumerateGpus()) {
+        if (gpu.luidHigh == static_cast<uint32_t>(luid->HighPart) && gpu.luidLow == luid->LowPart) {
+            return gpu.index;
+        }
+    }
+#endif
+    return -1;
 }
 
 MediaSource::~MediaSource()
@@ -66,7 +117,7 @@ std::expected<PixelFormat, StreamError> MediaSource::enableVideoStream(
     int streamIndex,
     std::vector<PixelFormat> requirePixelFormats,
     VideoDecodeMode decodeMode,
-    void* hardwareContext
+    int decodeAdapterIndex
 )
 {
     std::lock_guard<std::mutex> lock(m_stateMutex);
@@ -100,7 +151,7 @@ std::expected<PixelFormat, StreamError> MediaSource::enableVideoStream(
     LOG_INFO(m_logger, "Got stream. Index = {}, codec = {}", streamIndex, avcodec_get_name(stream->codecpar->codec_id));
 
     const bool hardwareDecode = decodeMode != VideoDecodeMode::Software;
-    auto decoder = createDecoder(stream, hardwareDecode, hardwareContext);
+    auto decoder = createDecoder(stream, hardwareDecode, decodeAdapterIndex);
     if (!decoder) {
         LOG_ERROR(m_logger, "Failed to create decoder");
         return std::unexpected(StreamError::DecoderCreationFailed);
@@ -123,11 +174,10 @@ std::expected<PixelFormat, StreamError> MediaSource::enableVideoStream(
     std::vector<FrameProcessorPtr> processors{};
     PixelFormat retFormat = mediaFrame.format().pixelFormat;
     if (decodeMode == VideoDecodeMode::HardwareDownload) {
-#ifdef _WIN32
-        // 处理链：先下载 GPU 纹理到 CPU，再按请求列表协商下载后的格式
-        D3D11FrameDownloader::Options downloaderOpts{};
+        // 处理链：先下载硬件帧到 CPU，再按请求列表协商下载后的格式
+        HwFrameDownloader::Options downloaderOpts{};
         downloaderOpts.logger = m_logger;
-        auto downloader = std::make_shared<D3D11FrameDownloader>(downloaderOpts);
+        auto downloader = std::make_shared<HwFrameDownloader>(downloaderOpts);
         // 用探测帧试下载，验证回读可用
         auto downloaded = downloader->process(mediaFrame.frame());
         if (!downloaded) {
@@ -141,7 +191,6 @@ std::expected<PixelFormat, StreamError> MediaSource::enableVideoStream(
             return std::unexpected(StreamError::DecoderCreationFailed);
         }
         retFormat = *negotiated;
-#endif
     } else if (decodeMode == VideoDecodeMode::Software) {
         // 检查像素格式是否在请求的格式里，如果不在，协商结果会追加转换器
         auto negotiated = negotiateCpuFrameFormat(mediaFrame.frame(), requirePixelFormats, processors);
@@ -536,13 +585,13 @@ void MediaSource::demuxWorkerFunc()
     }
 }
 
-std::unique_ptr<Decoder> MediaSource::createDecoder(const AVStream* stream, bool hwaccel, void* hwctx)
+std::unique_ptr<Decoder> MediaSource::createDecoder(const AVStream* stream, bool hwaccel, int adapterIndex)
 {
     Decoder::Options opts{};
     if (hwaccel) {
 #ifdef _WIN32
         opts.type = Decoder::Type::D3d11va;
-        opts.hardwareContext = hwctx;
+        opts.adapterIndex = adapterIndex;
 #else
         // 硬解不支持时直接失败，不回退软解：调用方是按硬解输出格式(如 D3D11 纹理)准备的渲染路径
         LOG_ERROR(m_logger, "Hardware acceleration is not supported on this platform");

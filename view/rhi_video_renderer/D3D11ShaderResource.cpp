@@ -108,12 +108,22 @@ void D3D11ShaderResource::updateTexture(QRhiResourceUpdateBatch* rub, const Fram
         return;
     }
 
-    auto* texture = frame->texture();
-    if (!texture) {
-        qCritical() << "Texture is null";
+    // 解码设备与渲染设备已解耦：通过共享句柄用渲染设备打开解码侧纹理，跨设备拷贝
+    auto* handle = frame->sharedTextureHandle();
+    if (!handle) {
+        qCritical() << "GPU frame has no shared texture handle";
         return;
     }
-    int subresource = frame->subresource();
+    if (handle != m_sharedHandle) {
+        m_sharedSource.Reset();
+        HRESULT hr = m_device->OpenSharedResource(handle, IID_PPV_ARGS(m_sharedSource.GetAddressOf()));
+        if (FAILED(hr)) {
+            m_sharedHandle = nullptr;
+            qCritical() << "Failed to open shared decode texture";
+            return;
+        }
+        m_sharedHandle = handle;
+    }
 
     D3D11_BOX srcBox{};
     srcBox.left = 0;
@@ -124,10 +134,10 @@ void D3D11ShaderResource::updateTexture(QRhiResourceUpdateBatch* rub, const Fram
     srcBox.back = 1;
 
     m_context->CopySubresourceRegion(
-        m_nativeTexture.Get(), 
-        0, 0, 0, 0, 
-        texture, 
-        subresource, 
+        m_nativeTexture.Get(),
+        0, 0, 0, 0,
+        m_sharedSource.Get(),
+        frame->subresource(),
         &srcBox
     );
 }

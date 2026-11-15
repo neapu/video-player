@@ -20,6 +20,14 @@ enum class VideoDecodeMode {
     HardwareDownload,  // 硬解码 + 下载 GPU 纹理到 CPU，输出 CPU 帧（软渲染）
 };
 
+// 可用于解码的 GPU 信息（Windows 为 DXGI 适配器，已过滤软件适配器）
+struct GpuInfo {
+    int index{0};           // 传给 enableVideoStream 的 decodeAdapterIndex 的序号
+    std::string name{};     // 适配器描述
+    uint32_t luidHigh{0};   // 适配器 LUID 高 32 位，用于与渲染 GPU 比较
+    uint32_t luidLow{0};    // 适配器 LUID 低 32 位
+};
+
 struct StreamInfo {
     StreamType type{StreamType::Unknown};
     int index{-1};
@@ -68,9 +76,10 @@ public:
      * @param streamIndex 媒体流索引。
      * @param requirePixelFormats 期望的像素格式。Software 与 HardwareDownload 模式下必填且参与格式协商；
      *                             Hardware 模式下忽略（输出格式由硬解码器决定）。
-     * @param decodeMode 解码模式，只对视频流有效。
-     * @param hardwareContext 硬件上下文指针，仅在硬解码模式（Hardware / HardwareDownload）下使用。
-     *                        裸指针安全声明：只借用，需要确保在 MediaSource 对象存在期间该指针有效。
+     * @param decodeMode 解码模式，只对视频流有效。硬解码使用 media 内部创建的 D3D11 设备，与渲染设备解耦：
+     *                   Hardware 模式的 GPU 帧通过共享纹理句柄由渲染线程跨设备拷贝（仅同 GPU 可靠，
+     *                   跨 GPU 时调用方应选择 HardwareDownload）。
+     * @param decodeAdapterIndex 解码适配器序号（enumerateGpus() 返回的 index），-1 = 使用 0 号适配器。
      * @return 成功返回实际输出的像素格式（Hardware 模式为硬件帧的底层像素格式；无法识别时为 None），失败返回错误。
      * @note Software 与 HardwareDownload 模式下，解码输出格式不在请求列表中时会转换为列表中首个可映射格式。
      * @note 启用流后必须消费，否则可能饿死其他流。只能在停止状态下操作流。
@@ -80,8 +89,22 @@ public:
         int streamIndex,
         std::vector<PixelFormat> requirePixelFormats,
         VideoDecodeMode decodeMode = VideoDecodeMode::Software,
-        void* hardwareContext = nullptr
+        int decodeAdapterIndex = -1
     ) = 0;
+
+    /**
+     * @brief 枚举可用于硬解码的 GPU。
+     * @return GPU 信息列表（Windows 为 DXGI 适配器，已过滤软件适配器）；不支持的平台返回空列表。
+     */
+    static std::vector<GpuInfo> enumerateGpus();
+
+    /**
+     * @brief 查找适配器 LUID 对应的 GPU 序号。
+     * @param adapterLuid 适配器 LUID（Windows 下为 DXGI_LUID*），只借用，调用期间有效即可。
+     * @return enumerateGpus() 列表中的序号；找不到或平台不支持返回 -1。
+     * @note 供调用方将渲染端 LUID 解析为解码 GPU 序号，实现"跟随渲染 GPU"或跨 GPU 降级决策。
+     */
+    static int gpuIndexByAdapterLuid(const void* adapterLuid);
     /**
      * @brief 启用指定的媒体流。适用于音频流。
      * @param streamIndex 媒体流索引。

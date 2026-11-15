@@ -23,6 +23,8 @@ set(SRC_FILES
     PacketCache.cpp
     FrameProcessor.h
     FrameProcessor.cpp
+    HwFrameDownloader.h
+    HwFrameDownloader.cpp
     SwsConvertor.h
     SwsConvertor.cpp
     SwrConvertor.h
@@ -35,8 +37,6 @@ if (WIN32)
     list(APPEND SRC_FILES
         D3d11vaDecoder.h
         D3d11vaDecoder.cpp
-        D3D11FrameDownloader.h
-        D3D11FrameDownloader.cpp
     )
 endif()
 

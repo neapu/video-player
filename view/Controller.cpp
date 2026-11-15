@@ -44,7 +44,7 @@ void Controller::setVideoSink(VideoSink* sink)
     m_videoSink = sink;
 }
 
-void Controller::openFile(const QString& filePath, media::VideoDecodeMode decodeMode)
+void Controller::openFile(const QString& filePath, media::VideoDecodeMode decodeMode, int decodeGpu)
 {
     if (state() != State::Stopped) {
         stop();
@@ -118,7 +118,7 @@ void Controller::openFile(const QString& filePath, media::VideoDecodeMode decode
     }
 
     bool gpuRender = false;
-    auto videoFormatOpt = enableVideoStream(decodeMode, gpuRender);
+    auto videoFormatOpt = enableVideoStream(decodeMode, decodeGpu, gpuRender);
     auto audioFormatOpt = enableAudioStream();
 
     if (!videoFormatOpt && !audioFormatOpt) {
@@ -523,7 +523,7 @@ void Controller::endOfStream()
     }
 }
 
-std::optional<view::PixelFormat> Controller::enableVideoStream(media::VideoDecodeMode decodeMode, bool& hw)
+std::optional<view::PixelFormat> Controller::enableVideoStream(media::VideoDecodeMode decodeMode, int decodeGpu, bool& hw)
 {
     if (m_videoStreamIndex < 0) return std::nullopt;
     if (!m_videoSink) {
@@ -532,17 +532,28 @@ std::optional<view::PixelFormat> Controller::enableVideoStream(media::VideoDecod
     }
 #ifdef _WIN32
     if (decodeMode != media::VideoDecodeMode::Software) { // 硬解码模式（直渲染或软渲染）
-        auto* context = m_videoSink->device();
-        if (context) {
+        // 渲染适配器 LUID：解析渲染 GPU 序号，实现 Auto 跟随渲染 GPU 与跨 GPU 降级。
+        // 为空说明渲染器无 D3D11 设备，GPU 帧路径不可用
+        auto* renderLuid = m_videoSink->adapterLuid();
+        if (renderLuid) {
+            const int renderGpu = media::IMediaSource::gpuIndexByAdapterLuid(renderLuid);
+            // Auto(-1) 时解码 GPU 跟随渲染 GPU
+            int decodeAdapterIndex = decodeGpu >= 0 ? decodeGpu : (renderGpu >= 0 ? renderGpu : 0);
+            // 同 GPU 探测：跨 GPU 的共享句柄拷贝不可靠，硬解直渲染自动降级为硬解软渲染
+            if (decodeMode == media::VideoDecodeMode::Hardware && renderGpu >= 0 && decodeAdapterIndex != renderGpu) {
+                qWarning() << "Decode GPU" << decodeAdapterIndex << "differs from render GPU" << renderGpu
+                           << ". Fallback to hardware download";
+                decodeMode = media::VideoDecodeMode::HardwareDownload;
+            }
             // 硬解软渲染请求 {Nv12, P010le}：下载格式直接用，零转换；
             // 硬解直渲染与现状一致，不传格式列表
             std::vector<media::PixelFormat> requireFormats{};
             if (decodeMode == media::VideoDecodeMode::HardwareDownload) {
                 requireFormats = {media::PixelFormat::Nv12, media::PixelFormat::P010le};
             }
-            auto formatExp = m_mediaSource->enableVideoStream(m_videoStreamIndex, std::move(requireFormats), decodeMode, context);
+            auto formatExp = m_mediaSource->enableVideoStream(m_videoStreamIndex, std::move(requireFormats), decodeMode, decodeAdapterIndex);
             if (formatExp && (formatExp.value() == media::PixelFormat::Nv12 || formatExp.value() == media::PixelFormat::P010le)) {
-                // Hardware：GPU 帧零拷贝渲染；HardwareDownload：下载后的 CPU 帧软渲染
+                // Hardware：GPU 帧跨设备拷贝渲染；HardwareDownload：下载后的 CPU 帧软渲染
                 hw = decodeMode == media::VideoDecodeMode::Hardware;
                 return formatExp.value();
             } else if (formatExp) {
@@ -552,11 +563,12 @@ std::optional<view::PixelFormat> Controller::enableVideoStream(media::VideoDecod
                 qWarning() << "Enable hw decode failed. Use software decode";
             }
         } else {
-            qWarning() << "No video context. Use software decode";
+            qWarning() << "No D3D11 render adapter. Use software decode";
         }
     }
 #else
     Q_UNUSED(decodeMode);
+    Q_UNUSED(decodeGpu);
 #endif
 
     auto formatExp = m_mediaSource->enableVideoStream(m_videoStreamIndex, {media::PixelFormat::Yuv420p, media::PixelFormat::Yuv420p10le});

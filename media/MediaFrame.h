@@ -35,6 +35,7 @@ public:
 #ifdef _WIN32
     ID3D11Texture2D* texture() const override;
     int subresource() const override;
+    void* sharedTextureHandle() const override;
 #endif
     void* rawFrame() override { return m_frame.get(); }
     const void* rawFrame() const override { return m_frame.get(); }

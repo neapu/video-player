@@ -177,6 +177,13 @@ public:
      * @return int 切片索引（即 MipLevel 为 0 时的子资源索引），非 GPU 帧返回 0
      */
     virtual int subresource() const = 0;
+
+    /**
+     * @brief 获取 GPU 帧纹理的跨设备共享句柄（仅 MemoryType::Gpu 帧且解码帧池带共享标志）
+     * @return void* 共享句柄（HANDLE），渲染设备的 ID3D11Device 可用 OpenSharedResource 打开后
+     *               配合 subresource() 跨设备拷贝；非 GPU 帧或不可共享返回 nullptr
+     */
+    virtual void* sharedTextureHandle() const = 0;
 #endif
 
     /**

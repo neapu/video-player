@@ -20,8 +20,7 @@ public:
     void refresh() override;
 
 #ifdef _WIN32
-    ID3D11Device* device() override { return m_device; }
-    ID3D11DeviceContext* context() override { return m_context; }
+    void* adapterLuid() override { return m_adapterLuidValid ? &m_adapterLuid : nullptr; }
 #endif
 
 signals:
@@ -52,6 +51,9 @@ private:
 #ifdef _WIN32
     ID3D11Device* m_device{nullptr};
     ID3D11DeviceContext* m_context{nullptr};
+    // 渲染设备所在适配器 LUID（initialize 时从 IDXGIDevice 取得）
+    LUID m_adapterLuid{};
+    bool m_adapterLuidValid{false};
 #endif
     bool m_clearFlag{false};
 };

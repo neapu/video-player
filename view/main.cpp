@@ -30,6 +30,14 @@ int main(int argc, char *argv[])
     );
     parser.addOption(hwDownloadOption);
 
+    // 指定解码GPU序号(带值选项，序号见 Decode GPU 菜单)
+    QCommandLineOption gpuOption(
+        QStringList() << "g" << "gpu",
+        "Decode GPU index (see Decode GPU menu)",
+        "index"
+    );
+    parser.addOption(gpuOption);
+
     // 输入文件(位置参数或者'-i'，非必须)
     QCommandLineOption inputFileOption(
         QStringList() << "i",
@@ -54,8 +62,16 @@ int main(int argc, char *argv[])
     } else if (parser.isSet(hwDownloadOption)) {
         decodeMode = media::VideoDecodeMode::HardwareDownload;
     }
+    int decodeGpu = -1;
+    if (parser.isSet(gpuOption)) {
+        bool ok = false;
+        decodeGpu = parser.value(gpuOption).toInt(&ok);
+        if (!ok || decodeGpu < 0) {
+            decodeGpu = -1;
+        }
+    }
 
-    view::MainWindow window{{input, decodeMode}};
+    view::MainWindow window{{input, decodeMode, decodeGpu}};
     window.show();
     int ret = app.exec();
     view::LogManager::uninstallMessageHandler();

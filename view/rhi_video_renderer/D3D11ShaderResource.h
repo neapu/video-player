@@ -23,6 +23,11 @@ protected:
     Microsoft::WRL::ComPtr<ID3D11Texture2D> m_nativeTexture{nullptr};
     DXGI_FORMAT m_textureFormat{ DXGI_FORMAT_UNKNOWN };
 
+    // 解码设备的纹理通过共享句柄在本(渲染)设备打开后跨设备拷贝；
+    // 解码帧池是一张纹理数组，句柄全池唯一，句柄变化(新解码池)时重开
+    HANDLE m_sharedHandle{nullptr};
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> m_sharedSource{nullptr};
+
     std::unique_ptr<QRhiSampler> m_sampler;
     std::unique_ptr<QRhiShaderResourceBindings> m_srb;
 };

@@ -18,6 +18,7 @@ public:
     struct Options {
         QString initialFilePath{};
         media::VideoDecodeMode decodeMode{media::VideoDecodeMode::Hardware};
+        int decodeGpu{-1};  // media::IMediaSource::enumerateGpus() 序号，-1 = 自动
     };
 
     explicit MainWindow(const Options &options, QWidget *parent = nullptr);
@@ -41,8 +42,9 @@ private slots:
 
 private:
     QString m_initialFilePath;
-    // 解码模式，通过菜单切换，对之后打开的文件生效
+    // 解码模式与解码 GPU，通过菜单切换，对之后打开的文件生效
     media::VideoDecodeMode m_decodeMode{media::VideoDecodeMode::Hardware};
+    int m_decodeGpu{-1};
 
     QRhiVideoRenderer* m_videoRenderer{nullptr};
 

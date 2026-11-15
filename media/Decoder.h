@@ -23,8 +23,8 @@ public:
         // 裸指针安全声明：只借用，需要确保在 create 函数调用期间该指针有效
         const AVStream* stream{nullptr};
         LoggerPtr logger{nullptr};
-        // 裸指针安全声明：只借用，需要确保在 Decoder 对象存在期间该指针有效
-        void* hardwareContext{nullptr};
+        // 硬解码使用的适配器序号（MediaSource 枚举的非软件 DXGI 适配器，-1 = 0 号）
+        int adapterIndex{-1};
     };
 
     static std::unique_ptr<Decoder> create(const Options& options);

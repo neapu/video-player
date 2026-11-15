@@ -1,6 +1,8 @@
 #include "MediaFrame.h"
 #ifdef _WIN32
 #include <d3d11.h>
+#include <dxgi.h>
+#include <wrl/client.h>
 #endif
 extern "C" {
 #include <libavutil/pixfmt.h>
@@ -349,6 +351,30 @@ int MediaFrame::subresource() const
     }
     // AV_PIX_FMT_D3D11 约定：data[1] 以指针宽度整数存放纹理数组切片索引
     return static_cast<int>(reinterpret_cast<uintptr_t>(m_frame->data[1]));
+}
+
+void* MediaFrame::sharedTextureHandle() const
+{
+    if (!m_frame || !m_frame->hw_frames_ctx || m_frame->format != AV_PIX_FMT_D3D11) {
+        return nullptr;
+    }
+    auto* texture = reinterpret_cast<ID3D11Texture2D*>(m_frame->data[0]);
+    if (!texture) {
+        return nullptr;
+    }
+    // 解码帧池的纹理带 D3D11_RESOURCE_MISC_SHARED 标志时可取出共享句柄；
+    // 池是一张纹理数组，句柄全池唯一，每帧取一次开销可忽略
+    Microsoft::WRL::ComPtr<IDXGIResource> resource;
+    HRESULT hr = texture->QueryInterface(IID_PPV_ARGS(resource.GetAddressOf()));
+    if (FAILED(hr)) {
+        return nullptr;
+    }
+    HANDLE handle{nullptr};
+    hr = resource->GetSharedHandle(&handle);
+    if (FAILED(hr)) {
+        return nullptr;
+    }
+    return handle;
 }
 #endif
 

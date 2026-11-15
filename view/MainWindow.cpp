@@ -30,6 +30,7 @@ MainWindow::MainWindow(const Options &options, QWidget* parent)
     : QMainWindow(parent)
     , m_initialFilePath(options.initialFilePath)
     , m_decodeMode(options.decodeMode)
+    , m_decodeGpu(options.decodeGpu)
 {
     resize(800, 600);
 
@@ -54,7 +55,9 @@ void MainWindow::openFile(const QString &filePath)
         return;
     }
 
-    m_controller->openFile(filePath, m_decodeMode);
+    m_controller->openFile(filePath, m_decodeMode, m_decodeGpu);
+    // 标题栏显示正在播放的文件路径
+    setWindowTitle(filePath);
     auto duration = m_controller->duration();
     if (duration > 0) {
         // 进度条单位用毫秒：QSlider的取值是int，微秒在约35分钟处溢出
@@ -166,6 +169,27 @@ void MainWindow::createMenu()
     addModeAction(tr("Software Decode"), media::VideoDecodeMode::Software);
     addModeAction(tr("Hardware Decode"), media::VideoDecodeMode::Hardware);
     addModeAction(tr("Hardware Decode + Software Render"), media::VideoDecodeMode::HardwareDownload);
+
+    // 解码 GPU 选择（Auto 跟随渲染 GPU），切换后对之后打开的文件生效
+    auto* gpuMenu = menuBar()->addMenu(tr("Decode GPU"));
+    auto* gpuGroup = new QActionGroup(this);
+    auto addGpuAction = [this, gpuMenu, gpuGroup](const QString& text, int index) {
+        auto* act = gpuMenu->addAction(text);
+        act->setCheckable(true);
+        act->setChecked(m_decodeGpu == index);
+        gpuGroup->addAction(act);
+        connect(act, &QAction::triggered, this, [this, index] {
+            m_decodeGpu = index;
+        });
+    };
+    addGpuAction(tr("Auto"), -1);
+    const auto gpus = media::IMediaSource::enumerateGpus();
+    for (const auto& gpu : gpus) {
+        addGpuAction(QString::fromStdString(gpu.name), gpu.index);
+    }
+    if (gpus.empty()) {
+        gpuMenu->setEnabled(false);
+    }
 }
 
 void MainWindow::onPlayStateChanged(Controller::State state)
