@@ -2,6 +2,7 @@
 #include <QVBoxLayout>
 #include <QMenuBar>
 #include <QFileDialog>
+#include <QActionGroup>
 
 namespace {
 QPushButton* createIconButton(const QIcon& icon, const QString& toolTip, QWidget* parent = nullptr)
@@ -28,7 +29,7 @@ namespace view {
 MainWindow::MainWindow(const Options &options, QWidget* parent) 
     : QMainWindow(parent)
     , m_initialFilePath(options.initialFilePath)
-    , m_hwaccel(options.hwaccel)
+    , m_decodeMode(options.decodeMode)
 {
     resize(800, 600);
 
@@ -53,7 +54,7 @@ void MainWindow::openFile(const QString &filePath)
         return;
     }
 
-    m_controller->openFile(filePath, m_hwaccel);
+    m_controller->openFile(filePath, m_decodeMode);
     auto duration = m_controller->duration();
     if (duration > 0) {
         // 进度条单位用毫秒：QSlider的取值是int，微秒在约35分钟处溢出
@@ -149,6 +150,22 @@ void MainWindow::createMenu()
 
     connect(openAct, &QAction::triggered, this, &MainWindow::onOpenTriggered);
     connect(exitAct, &QAction::triggered, this, &QMainWindow::close);
+
+    // 解码模式三选一，切换后对之后打开的文件生效
+    auto* modeMenu = menuBar()->addMenu(tr("Decode Mode"));
+    auto* modeGroup = new QActionGroup(this);
+    auto addModeAction = [this, modeMenu, modeGroup](const QString& text, media::VideoDecodeMode mode) {
+        auto* act = modeMenu->addAction(text);
+        act->setCheckable(true);
+        act->setChecked(m_decodeMode == mode);
+        modeGroup->addAction(act);
+        connect(act, &QAction::triggered, this, [this, mode] {
+            m_decodeMode = mode;
+        });
+    };
+    addModeAction(tr("Software Decode"), media::VideoDecodeMode::Software);
+    addModeAction(tr("Hardware Decode"), media::VideoDecodeMode::Hardware);
+    addModeAction(tr("Hardware Decode + Software Render"), media::VideoDecodeMode::HardwareDownload);
 }
 
 void MainWindow::onPlayStateChanged(Controller::State state)

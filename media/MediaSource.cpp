@@ -5,6 +5,9 @@
 #include "SwsConvertor.h"
 #include "SwrConvertor.h"
 #include "DecodeProbe.h"
+#ifdef _WIN32
+#include "D3D11FrameDownloader.h"
+#endif
 
 namespace media {
 std::expected<std::unique_ptr<IMediaSource>, CreateError> IMediaSource::create(const Options& options)
@@ -62,7 +65,7 @@ std::vector<StreamInfo> MediaSource::streamsInfo() const
 std::expected<PixelFormat, StreamError> MediaSource::enableVideoStream(
     int streamIndex,
     std::vector<PixelFormat> requirePixelFormats,
-    bool hardwareAccelerated,
+    VideoDecodeMode decodeMode,
     void* hardwareContext
 )
 {
@@ -79,7 +82,8 @@ std::expected<PixelFormat, StreamError> MediaSource::enableVideoStream(
         return std::unexpected(StreamError::InvalidIndex);
     }
 
-    if (!hardwareAccelerated && requirePixelFormats.empty()) {
+    // Hardware 模式忽略请求列表(输出格式由硬解码器决定)，Software 与 HardwareDownload 参与协商，必填
+    if (decodeMode != VideoDecodeMode::Hardware && requirePixelFormats.empty()) {
         return std::unexpected(StreamError::RequestFormatEmpty);
     }
 
@@ -95,7 +99,8 @@ std::expected<PixelFormat, StreamError> MediaSource::enableVideoStream(
 
     LOG_INFO(m_logger, "Got stream. Index = {}, codec = {}", streamIndex, avcodec_get_name(stream->codecpar->codec_id));
 
-    auto decoder = createDecoder(stream, hardwareAccelerated, hardwareContext);
+    const bool hardwareDecode = decodeMode != VideoDecodeMode::Software;
+    auto decoder = createDecoder(stream, hardwareDecode, hardwareContext);
     if (!decoder) {
         LOG_ERROR(m_logger, "Failed to create decoder");
         return std::unexpected(StreamError::DecoderCreationFailed);
@@ -109,38 +114,45 @@ std::expected<PixelFormat, StreamError> MediaSource::enableVideoStream(
     }
     MediaFrame mediaFrame(FrameType::Normal, std::move(frame));
 
-    if (hardwareAccelerated && (mediaFrame.format().memoryType != MemoryType::Gpu
+    if (hardwareDecode && (mediaFrame.format().memoryType != MemoryType::Gpu
         || mediaFrame.frame()->format != AV_PIX_FMT_D3D11)) {
         LOG_ERROR(m_logger, "Hardware decoder did not produce a D3D11 frame");
         return std::unexpected(StreamError::DecoderCreationFailed);
     }
 
+    std::vector<FrameProcessorPtr> processors{};
     PixelFormat retFormat = mediaFrame.format().pixelFormat;
-    // 检查像素格式是否在请求的格式里，如果不在，要创建转换器(硬解码时忽略)
-    std::shared_ptr<SwsConvertor> converter{nullptr};
-    if (!hardwareAccelerated && std::find(requirePixelFormats.begin(), requirePixelFormats.end(), retFormat) == requirePixelFormats.end()) {
-        // 请求列表里可能含不可映射的项(如 None)，取第一个可映射的格式作为转换目标
-        auto targetIt = std::find_if(requirePixelFormats.begin(), requirePixelFormats.end(), [](PixelFormat format) {
-            return MediaFrame::toAvPixelFormat(format) != AV_PIX_FMT_NONE;
-        });
-        if (targetIt == requirePixelFormats.end()) {
-            LOG_ERROR(m_logger, "No mappable pixel format in requested formats");
+    if (decodeMode == VideoDecodeMode::HardwareDownload) {
+#ifdef _WIN32
+        // 处理链：先下载 GPU 纹理到 CPU，再按请求列表协商下载后的格式
+        D3D11FrameDownloader::Options downloaderOpts{};
+        downloaderOpts.logger = m_logger;
+        auto downloader = std::make_shared<D3D11FrameDownloader>(downloaderOpts);
+        // 用探测帧试下载，验证回读可用
+        auto downloaded = downloader->process(mediaFrame.frame());
+        if (!downloaded) {
+            LOG_ERROR(m_logger, "Failed to download hardware frame");
             return std::unexpected(StreamError::DecoderCreationFailed);
         }
-        AVPixelFormat target = MediaFrame::toAvPixelFormat(*targetIt);
-        SwsConvertor::Options opts{};
-        opts.targetFormat = target;
-        converter = std::make_shared<SwsConvertor>(opts);
-        // 测试一下工作是否正常，就用刚才测试解码时的帧
-        auto retFrame = converter->process(mediaFrame.frame());
-        if (!retFrame) {
-            LOG_ERROR(m_logger, "Failed to convert frame");
-            return std::unexpected(StreamError::DecoderCreationFailed);
-        }
-        retFormat = *targetIt;
-    }
+        processors.push_back(std::move(downloader));
 
-    auto decodeWorker = createVideoDecodeWorker(stream, std::move(decoder), converter);
+        auto negotiated = negotiateCpuFrameFormat(downloaded, requirePixelFormats, processors);
+        if (!negotiated) {
+            return std::unexpected(StreamError::DecoderCreationFailed);
+        }
+        retFormat = *negotiated;
+#endif
+    } else if (decodeMode == VideoDecodeMode::Software) {
+        // 检查像素格式是否在请求的格式里，如果不在，协商结果会追加转换器
+        auto negotiated = negotiateCpuFrameFormat(mediaFrame.frame(), requirePixelFormats, processors);
+        if (!negotiated) {
+            return std::unexpected(StreamError::DecoderCreationFailed);
+        }
+        retFormat = *negotiated;
+    }
+    // Hardware 模式：GPU 帧直接透传，返回硬件帧的底层像素格式
+
+    auto decodeWorker = createVideoDecodeWorker(stream, std::move(decoder), std::move(processors));
     if (!decodeWorker) {
         LOG_ERROR(m_logger, "Failed to create decode worker");
         return std::unexpected(StreamError::DecoderCreationFailed);
@@ -148,6 +160,38 @@ std::expected<PixelFormat, StreamError> MediaSource::enableVideoStream(
     m_decodeWorkers[streamIndex] = std::move(decodeWorker);
 
     return retFormat;
+}
+
+std::optional<PixelFormat> MediaSource::negotiateCpuFrameFormat(
+    const fh::FramePtr& probeFrame,
+    const std::vector<PixelFormat>& requirePixelFormats,
+    std::vector<FrameProcessorPtr>& outProcessors)
+{
+    PixelFormat frameFormat = MediaFrame::toPixelFormat(static_cast<AVPixelFormat>(probeFrame->format));
+    if (std::find(requirePixelFormats.begin(), requirePixelFormats.end(), frameFormat) != requirePixelFormats.end()) {
+        return frameFormat;
+    }
+    // 请求列表里可能含不可映射的项(如 None)，取第一个可映射的格式作为转换目标
+    auto targetIt = std::find_if(requirePixelFormats.begin(), requirePixelFormats.end(), [](PixelFormat format) {
+        return MediaFrame::toAvPixelFormat(format) != AV_PIX_FMT_NONE;
+    });
+    if (targetIt == requirePixelFormats.end()) {
+        LOG_ERROR(m_logger, "No mappable pixel format in requested formats");
+        return std::nullopt;
+    }
+    AVPixelFormat target = MediaFrame::toAvPixelFormat(*targetIt);
+    SwsConvertor::Options opts{};
+    opts.targetFormat = target;
+    opts.logger = m_logger;
+    auto converter = std::make_shared<SwsConvertor>(opts);
+    // 测试一下工作是否正常，就用刚才测试解码时的帧
+    auto retFrame = converter->process(probeFrame);
+    if (!retFrame) {
+        LOG_ERROR(m_logger, "Failed to convert frame");
+        return std::nullopt;
+    }
+    outProcessors.push_back(std::move(converter));
+    return *targetIt;
 }
 
 std::expected<SampleFormat, StreamError> MediaSource::enableAudioStream(int streamIndex, std::vector<SampleFormat> requireSampleFormats)
@@ -221,7 +265,11 @@ std::expected<SampleFormat, StreamError> MediaSource::enableAudioStream(int stre
         retFormat = *targetIt;
     }
 
-    auto decodeWorker = createAudioDecodeWorker(stream, std::move(decoder), converter);
+    std::vector<FrameProcessorPtr> processors{};
+    if (converter) {
+        processors.push_back(std::move(converter));
+    }
+    auto decodeWorker = createAudioDecodeWorker(stream, std::move(decoder), std::move(processors));
     if (!decodeWorker) {
         LOG_ERROR(m_logger, "Failed to create decode worker");
         return std::unexpected(StreamError::DecoderCreationFailed);
@@ -508,7 +556,7 @@ std::unique_ptr<Decoder> MediaSource::createDecoder(const AVStream* stream, bool
     return Decoder::create(opts);
 }
 
-std::unique_ptr<DecodeWorker> MediaSource::createVideoDecodeWorker(const AVStream* stream, std::unique_ptr<Decoder>&& decoder, FrameProcessorPtr processor)
+std::unique_ptr<DecodeWorker> MediaSource::createVideoDecodeWorker(const AVStream* stream, std::unique_ptr<Decoder>&& decoder, std::vector<FrameProcessorPtr> processors)
 {
     // 估算包队列长度
     // 目标是视频缓存10秒，音频缓存3秒
@@ -522,11 +570,11 @@ std::unique_ptr<DecodeWorker> MediaSource::createVideoDecodeWorker(const AVStrea
     DecodeWorker::Options decodeWorkerOpts;
     decodeWorkerOpts.maxPacketQueueSize = packetQueueLength;
     decodeWorkerOpts.maxFrameQueueSize = 5;
-    decodeWorkerOpts.processor = std::move(processor);
+    decodeWorkerOpts.processors = std::move(processors);
     decodeWorkerOpts.logger = m_logger;
     return DecodeWorker::create(decodeWorkerOpts, std::move(decoder));
 }
-std::unique_ptr<DecodeWorker> MediaSource::createAudioDecodeWorker(const AVStream* stream, std::unique_ptr<Decoder>&& decoder, FrameProcessorPtr processor)
+std::unique_ptr<DecodeWorker> MediaSource::createAudioDecodeWorker(const AVStream* stream, std::unique_ptr<Decoder>&& decoder, std::vector<FrameProcessorPtr> processors)
 {
     // 估算包队列长度
     // 目标是视频缓存10秒，音频缓存3秒
@@ -542,7 +590,7 @@ std::unique_ptr<DecodeWorker> MediaSource::createAudioDecodeWorker(const AVStrea
     DecodeWorker::Options decodeWorkerOpts;
     decodeWorkerOpts.maxPacketQueueSize = packetQueueLength;
     decodeWorkerOpts.maxFrameQueueSize = 30;
-    decodeWorkerOpts.processor = std::move(processor);
+    decodeWorkerOpts.processors = std::move(processors);
     decodeWorkerOpts.logger = m_logger;
     return DecodeWorker::create(decodeWorkerOpts, std::move(decoder));
 }

@@ -1,6 +1,7 @@
 #pragma once
 #include <thread>
 #include <mutex>
+#include <optional>
 #include "media/IMediaSource.h"
 #include "PacketCache.h"
 #include <unordered_map>
@@ -16,9 +17,9 @@ public:
 
     std::vector<StreamInfo> streamsInfo() const override;
     std::expected<PixelFormat, StreamError> enableVideoStream(
-        int streamIndex, 
+        int streamIndex,
         std::vector<PixelFormat> requirePixelFormats,
-        bool hardwareAccelerated = false,
+        VideoDecodeMode decodeMode = VideoDecodeMode::Software,
         void* hardwareContext = nullptr
     ) override;
     std::expected<SampleFormat, StreamError> enableAudioStream(
@@ -41,8 +42,15 @@ private:
     CreateError initialize();
 
     std::unique_ptr<Decoder> createDecoder(const AVStream* stream, bool hwaccel = false, void* hwctx = nullptr);
-    DecodeWorkerPtr createVideoDecodeWorker(const AVStream* stream, std::unique_ptr<Decoder>&& decoder, FrameProcessorPtr processor);
-    DecodeWorkerPtr createAudioDecodeWorker(const AVStream* stream, std::unique_ptr<Decoder>&& decoder, FrameProcessorPtr processor);
+    DecodeWorkerPtr createVideoDecodeWorker(const AVStream* stream, std::unique_ptr<Decoder>&& decoder, std::vector<FrameProcessorPtr> processors);
+    DecodeWorkerPtr createAudioDecodeWorker(const AVStream* stream, std::unique_ptr<Decoder>&& decoder, std::vector<FrameProcessorPtr> processors);
+    // CPU 帧格式协商：探测帧格式在请求列表中→不追加处理器；
+    // 否则追加 SwsConvertor 转换到列表中首个可映射格式，并用探测帧试转换验证。
+    // 成功返回最终格式，失败返回 nullopt（调用方按解码器创建失败处理）
+    std::optional<PixelFormat> negotiateCpuFrameFormat(
+        const fh::FramePtr& probeFrame,
+        const std::vector<PixelFormat>& requirePixelFormats,
+        std::vector<FrameProcessorPtr>& outProcessors);
 
     void demuxWorkerFunc();
 private:

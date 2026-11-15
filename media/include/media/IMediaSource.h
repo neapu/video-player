@@ -14,6 +14,12 @@ enum class StreamType {
     Unknown
 };
 
+enum class VideoDecodeMode {
+    Software,          // 软解码，输出 CPU 帧
+    Hardware,          // 硬解码（D3D11VA），输出 GPU 帧（零拷贝渲染）
+    HardwareDownload,  // 硬解码 + 下载 GPU 纹理到 CPU，输出 CPU 帧（软渲染）
+};
+
 struct StreamInfo {
     StreamType type{StreamType::Unknown};
     int index{-1};
@@ -60,18 +66,20 @@ public:
     /**
      * @brief 启用指定的媒体流。适用于视频流。
      * @param streamIndex 媒体流索引。
-     * @param requirePixelFormats 期望的像素格式。
-     * @param hardwareAccelerated 是否启用硬件加速，只对视频流有效。
-     * @param hardwareContext 硬件上下文指针，仅在启用硬件加速时使用。裸指针安全声明：只借用，需要确保在 MediaSource 对象存在期间该指针有效。
-     * @return 成功返回探测到的输出像素格式（硬解时为硬件帧的底层像素格式；无法识别时为 None），失败返回错误。
+     * @param requirePixelFormats 期望的像素格式。Software 与 HardwareDownload 模式下必填且参与格式协商；
+     *                             Hardware 模式下忽略（输出格式由硬解码器决定）。
+     * @param decodeMode 解码模式，只对视频流有效。
+     * @param hardwareContext 硬件上下文指针，仅在硬解码模式（Hardware / HardwareDownload）下使用。
+     *                        裸指针安全声明：只借用，需要确保在 MediaSource 对象存在期间该指针有效。
+     * @return 成功返回实际输出的像素格式（Hardware 模式为硬件帧的底层像素格式；无法识别时为 None），失败返回错误。
+     * @note Software 与 HardwareDownload 模式下，解码输出格式不在请求列表中时会转换为列表中首个可映射格式。
      * @note 启用流后必须消费，否则可能饿死其他流。只能在停止状态下操作流。
-     * @note 如果启用硬件加速解码，会无视 requirePixelFormats。
      * @note 线程安全，可与其他接口从不同线程并发调用。
      */
     virtual std::expected<PixelFormat, StreamError> enableVideoStream(
         int streamIndex,
         std::vector<PixelFormat> requirePixelFormats,
-        bool hardwareAccelerated = false,
+        VideoDecodeMode decodeMode = VideoDecodeMode::Software,
         void* hardwareContext = nullptr
     ) = 0;
     /**

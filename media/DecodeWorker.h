@@ -1,6 +1,7 @@
 #pragma once
 #include <thread>
 #include <deque>
+#include <vector>
 #include <mutex>
 #include <atomic>
 #include <condition_variable>
@@ -16,7 +17,8 @@ public:
     struct Options {
         int maxPacketQueueSize = 100;
         int maxFrameQueueSize = 5;
-        FrameProcessorPtr processor{nullptr};
+        // 处理链：帧入队前按序依次执行，任一环节失败则丢弃该帧
+        std::vector<FrameProcessorPtr> processors{};
         LoggerPtr logger;
     };
 
@@ -44,7 +46,7 @@ private:
 private:
     int m_maxPacketQueueSize;
     int m_maxFrameQueueSize;
-    FrameProcessorPtr m_processor;
+    std::vector<FrameProcessorPtr> m_processors;
     LoggerPtr m_logger;
     std::unique_ptr<Decoder> m_decoder;
     std::thread m_thread;

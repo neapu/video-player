@@ -5,6 +5,7 @@
 #include <QLabel>
 #include "rhi_video_renderer/QRhiVideoRenderer.h"
 #include "Controller.h"
+#include "media/IMediaSource.h"
 #include "components/PlayOrPauseButton.h"
 #include "components/PlaybackSlider.h"
 #include "components/VolumeButton.h"
@@ -16,7 +17,7 @@ class MainWindow : public QMainWindow {
 public:
     struct Options {
         QString initialFilePath{};
-        bool hwaccel{true};
+        media::VideoDecodeMode decodeMode{media::VideoDecodeMode::Hardware};
     };
 
     explicit MainWindow(const Options &options, QWidget *parent = nullptr);
@@ -40,7 +41,8 @@ private slots:
 
 private:
     QString m_initialFilePath;
-    bool m_hwaccel{true};
+    // 解码模式，通过菜单切换，对之后打开的文件生效
+    media::VideoDecodeMode m_decodeMode{media::VideoDecodeMode::Hardware};
 
     QRhiVideoRenderer* m_videoRenderer{nullptr};
 

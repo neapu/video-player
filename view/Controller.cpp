@@ -44,7 +44,7 @@ void Controller::setVideoSink(VideoSink* sink)
     m_videoSink = sink;
 }
 
-void Controller::openFile(const QString& filePath, bool tryHw)
+void Controller::openFile(const QString& filePath, media::VideoDecodeMode decodeMode)
 {
     if (state() != State::Stopped) {
         stop();
@@ -117,8 +117,8 @@ void Controller::openFile(const QString& filePath, bool tryHw)
         m_videoFps = 15;
     }
 
-    bool hwaccel = tryHw;
-    auto videoFormatOpt = enableVideoStream(hwaccel);
+    bool gpuRender = false;
+    auto videoFormatOpt = enableVideoStream(decodeMode, gpuRender);
     auto audioFormatOpt = enableAudioStream();
 
     if (!videoFormatOpt && !audioFormatOpt) {
@@ -195,7 +195,7 @@ void Controller::openFile(const QString& filePath, bool tryHw)
         videoSinkOpts.format = *videoFormatOpt;
         videoSinkOpts.width = videoWidth;
         videoSinkOpts.height = videoHeight;
-        videoSinkOpts.hwaccel = hwaccel;
+        videoSinkOpts.hwaccel = gpuRender;
         videoSinkOpts.frameSource = [this] { return nextVideoFrame(); };
         m_videoSink->start(videoSinkOpts);
     }
@@ -523,20 +523,27 @@ void Controller::endOfStream()
     }
 }
 
-std::optional<view::PixelFormat> Controller::enableVideoStream(bool& hw)
+std::optional<view::PixelFormat> Controller::enableVideoStream(media::VideoDecodeMode decodeMode, bool& hw)
 {
     if (m_videoStreamIndex < 0) return std::nullopt;
     if (!m_videoSink) {
         qCritical() << "No video sink";
         return std::nullopt;
     }
-    if (hw) { // 先尝试硬解
 #ifdef _WIN32
+    if (decodeMode != media::VideoDecodeMode::Software) { // 硬解码模式（直渲染或软渲染）
         auto* context = m_videoSink->device();
         if (context) {
-            auto formatExp = m_mediaSource->enableVideoStream(m_videoStreamIndex, {}, true, context);
+            // 硬解软渲染请求 {Nv12, P010le}：下载格式直接用，零转换；
+            // 硬解直渲染与现状一致，不传格式列表
+            std::vector<media::PixelFormat> requireFormats{};
+            if (decodeMode == media::VideoDecodeMode::HardwareDownload) {
+                requireFormats = {media::PixelFormat::Nv12, media::PixelFormat::P010le};
+            }
+            auto formatExp = m_mediaSource->enableVideoStream(m_videoStreamIndex, std::move(requireFormats), decodeMode, context);
             if (formatExp && (formatExp.value() == media::PixelFormat::Nv12 || formatExp.value() == media::PixelFormat::P010le)) {
-                hw = true;
+                // Hardware：GPU 帧零拷贝渲染；HardwareDownload：下载后的 CPU 帧软渲染
+                hw = decodeMode == media::VideoDecodeMode::Hardware;
                 return formatExp.value();
             } else if (formatExp) {
                 qWarning() << "Unsupported hw format";
@@ -547,8 +554,10 @@ std::optional<view::PixelFormat> Controller::enableVideoStream(bool& hw)
         } else {
             qWarning() << "No video context. Use software decode";
         }
-#endif
     }
+#else
+    Q_UNUSED(decodeMode);
+#endif
 
     auto formatExp = m_mediaSource->enableVideoStream(m_videoStreamIndex, {media::PixelFormat::Yuv420p, media::PixelFormat::Yuv420p10le});
     if (!formatExp) {

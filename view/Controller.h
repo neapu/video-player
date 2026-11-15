@@ -28,7 +28,7 @@ public:
     // 裸指针安全声明：只借用，生命周期必须大于Controller对象
     void setVideoSink(VideoSink* sink);
 
-    void openFile(const QString &filePath, bool tryHw = true);
+    void openFile(const QString &filePath, media::VideoDecodeMode decodeMode = media::VideoDecodeMode::Hardware);
     void pauseOrResume();
     void stop();
 
@@ -60,7 +60,8 @@ private:
 
     void endOfStream();
 
-    std::optional<view::PixelFormat> enableVideoStream(bool& hw);
+    // 按解码模式启用视频流；hw 出参表示是否走 GPU 零拷贝渲染（软解码与硬解软渲染为 false）
+    std::optional<view::PixelFormat> enableVideoStream(media::VideoDecodeMode decodeMode, bool& hw);
     std::optional<view::SampleFormat> enableAudioStream();
 
 private:

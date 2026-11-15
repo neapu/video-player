@@ -32,9 +32,11 @@ set(SRC_FILES
 )
 
 if (WIN32)
-    list(APPEND SRC_FILES 
+    list(APPEND SRC_FILES
         D3d11vaDecoder.h
         D3d11vaDecoder.cpp
+        D3D11FrameDownloader.h
+        D3D11FrameDownloader.cpp
     )
 endif()
 

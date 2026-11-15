@@ -13,7 +13,7 @@ std::unique_ptr<DecodeWorker> DecodeWorker::create(const Options& opts, std::uni
 DecodeWorker::DecodeWorker(const Options& opts, std::unique_ptr<Decoder>&& decoder)
     : m_maxPacketQueueSize(opts.maxPacketQueueSize)
     , m_maxFrameQueueSize(opts.maxFrameQueueSize)
-    , m_processor(opts.processor)
+    , m_processors(std::move(opts.processors))
     , m_logger(opts.logger)
     , m_decoder(std::move(decoder))
 {
@@ -210,8 +210,8 @@ void DecodeWorker::drainDecoder()
 
 bool DecodeWorker::enqueueFrame(fh::FramePtr&& frame)
 {
-    if (m_processor) {
-        frame = m_processor->process(std::move(frame));
+    for (auto& processor : m_processors) {
+        frame = processor->process(std::move(frame));
         if (!frame) {
             return false;
         }

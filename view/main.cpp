@@ -23,6 +23,13 @@ int main(int argc, char *argv[])
     );
     parser.addOption(softDecodeOption);
 
+    // 硬解码+纹理下载到CPU软渲染(无值选项)
+    QCommandLineOption hwDownloadOption(
+        QStringList() << "d" << "hw-download",
+        "Hardware decoding with GPU texture download to CPU (software rendering)"
+    );
+    parser.addOption(hwDownloadOption);
+
     // 输入文件(位置参数或者'-i'，非必须)
     QCommandLineOption inputFileOption(
         QStringList() << "i",
@@ -41,7 +48,14 @@ int main(int argc, char *argv[])
         input = parser.positionalArguments().value(0);
     }
 
-    view::MainWindow window{{input, !soft}};
+    media::VideoDecodeMode decodeMode = media::VideoDecodeMode::Hardware;
+    if (soft) {
+        decodeMode = media::VideoDecodeMode::Software;
+    } else if (parser.isSet(hwDownloadOption)) {
+        decodeMode = media::VideoDecodeMode::HardwareDownload;
+    }
+
+    view::MainWindow window{{input, decodeMode}};
     window.show();
     int ret = app.exec();
     view::LogManager::uninstallMessageHandler();
