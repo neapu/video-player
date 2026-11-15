@@ -136,10 +136,19 @@ void QRhiVideoRenderer::stop()
 {
     m_frameSource = nullptr;
     m_running = false;
+    m_refreshPending = false;
 }
 void QRhiVideoRenderer::clear()
 {
     m_clearFlag = true;
+    update();
+}
+
+void QRhiVideoRenderer::refresh()
+{
+    // 帧可能尚未解码完成（seek落定前拉到Empty），给轮询设置一个期限，避免暂停状态下常驻重绘
+    m_refreshPending = true;
+    m_refreshDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
     update();
 }
 
@@ -234,8 +243,27 @@ void QRhiVideoRenderer::render(QRhiCommandBuffer* cb)
         return;
     }
 
-    
-    if (!m_running) return;
+
+    if (!m_running) {
+        // 暂停状态下的一次性刷新：seek后轮询拉取目标帧，渲染成功或超时后停止，保持暂停
+        if (!m_refreshPending) {
+            return;
+        }
+        if (std::chrono::steady_clock::now() >= m_refreshDeadline) {
+            m_refreshPending = false;
+            return;
+        }
+        auto frame = m_frameSource();
+        if (frame) {
+            renderFrame(cb, std::move(frame));
+            m_refreshPending = false;
+            return;
+        }
+        // 帧还没就绪（seek未落定），继续轮询
+        update();
+        return;
+    }
+
     auto frame = m_frameSource();
     if (!frame) {
         if (m_running) update();

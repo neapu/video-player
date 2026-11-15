@@ -16,6 +16,8 @@ qt_add_executable(${EXE_NAME}
 
     components/PlayOrPauseButton.h
     components/PlayOrPauseButton.cpp
+    components/PlaybackSlider.h
+    components/PlaybackSlider.cpp
 )
 
 qt_add_resources(${EXE_NAME} "player_icons"

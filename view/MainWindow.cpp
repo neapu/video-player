@@ -56,7 +56,8 @@ void MainWindow::openFile(const QString &filePath)
     m_controller->openFile(filePath, m_hwaccel);
     auto duration = m_controller->duration();
     if (duration > 0) {
-        m_playbackBar->setMaximum(duration);
+        // 进度条单位用毫秒：QSlider的取值是int，微秒在约35分钟处溢出
+        m_playbackBar->setMaximum(static_cast<int>(duration / 1000));
         m_playbackBar->setValue(0);
         m_durationStr = timeToStr(duration);
         m_timeLabel->setText(QString("0:00/%1").arg(m_durationStr));
@@ -78,7 +79,7 @@ void MainWindow::createCentralWidget()
     auto* bar1 = new QHBoxLayout(central);
     bar1->setSpacing(5);
     bar1->setContentsMargins(5, 5, 5, 5);
-    m_playbackBar = new QSlider(Qt::Horizontal, central);
+    m_playbackBar = new PlaybackSlider(Qt::Horizontal, central);
     m_playbackBar->setEnabled(false);
     bar1->addWidget(m_playbackBar, 1);
     m_volumeBar = new QSlider(Qt::Horizontal, central);
@@ -105,6 +106,19 @@ void MainWindow::createCentralWidget()
     connect(m_videoRenderer, &QRhiVideoRenderer::initialized, this, &MainWindow::onVideoRendererInitialized, Qt::QueuedConnection);
     connect(m_playButton, &PlayOrPauseButton::clicked, this, &MainWindow::onPlayOrPauseButtonClicked);
     connect(m_stopButton, &QPushButton::clicked, this, &MainWindow::onStopButtonClicked);
+
+    // 拖动进度条：拖动中仅预览位置与时间，松手后才seek
+    connect(m_playbackBar, &QSlider::sliderPressed, this, [this] {
+        m_seeking = true;
+        previewSeekPosition(m_playbackBar->value());
+    });
+    connect(m_playbackBar, &QSlider::sliderMoved, this, [this](int value) {
+        previewSeekPosition(value);
+    });
+    connect(m_playbackBar, &QSlider::sliderReleased, this, [this] {
+        m_seeking = false;
+        m_controller->seek(static_cast<int64_t>(m_playbackBar->value()) * 1000);
+    });
 }
 
 void MainWindow::createMenu()
@@ -169,8 +183,17 @@ void MainWindow::onStopButtonClicked()
 
 void MainWindow::onPositionChanged(int64_t pos)
 {
-    m_playbackBar->setValue(pos);
+    if (m_seeking) {
+        // 拖动中不接受播放位置回写，避免滑块来回跳动
+        return;
+    }
+    m_playbackBar->setValue(static_cast<int>(pos / 1000));
     m_timeLabel->setText(QString("%1/%2").arg(timeToStr(pos)).arg(m_durationStr));
+}
+
+void MainWindow::previewSeekPosition(int valueMs)
+{
+    m_timeLabel->setText(QString("%1/%2").arg(timeToStr(static_cast<int64_t>(valueMs) * 1000)).arg(m_durationStr));
 }
 
 } // namespace view

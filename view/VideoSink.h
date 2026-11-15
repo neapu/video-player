@@ -30,6 +30,8 @@ public:
     virtual void pause() = 0;
     virtual void resume() = 0;
     virtual void clear() {}
+    // 暂停状态下请求渲染一帧（如暂停中seek后刷新画面），渲染完或超时后保持暂停
+    virtual void refresh() {}
 
 #ifdef _WIN32
     virtual ID3D11Device* device() { return nullptr; };

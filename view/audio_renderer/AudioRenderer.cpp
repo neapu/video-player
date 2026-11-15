@@ -130,6 +130,12 @@ void AudioRenderer::resume()
     ma_device_start(&m_device);
 }
 
+void AudioRenderer::flush()
+{
+    // 只置标记，m_playingFrame 等归音频回调线程所有，由回调开始时重置
+    m_flushPending.store(true);
+}
+
 void AudioRenderer::setVolume(float volume)
 {
     m_volume = volume;
@@ -138,6 +144,12 @@ void AudioRenderer::setVolume(float volume)
 
 void AudioRenderer::maDataCallback(ma_device* pDevice, void* pOutput, const void* pInput, uint32_t frameCount)
 {
+    if (m_flushPending.exchange(false)) {
+        // 丢弃seek前拉取的旧帧，回调后续循环会从frameSource拉取新位置的数据
+        m_playingFrame.reset();
+        m_playingOffset = 0;
+    }
+
     const size_t requireSize = frameCount * m_channels * sizePerSample(m_sampleFormat);
     const size_t bytesPerFrame = m_channels * sizePerSample(m_sampleFormat);
     size_t playedSize{0};

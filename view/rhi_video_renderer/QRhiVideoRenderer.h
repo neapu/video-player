@@ -1,6 +1,7 @@
 #pragma once
 #include <QRhiWidget>
 #include <rhi/qrhi.h>
+#include <chrono>
 #include "../VideoSink.h"
 #include "ShaderResource.h"
 
@@ -16,6 +17,7 @@ public:
     void pause() override;
     void resume() override;
     void clear() override;
+    void refresh() override;
 
 #ifdef _WIN32
     ID3D11Device* device() override { return m_device; }
@@ -42,6 +44,10 @@ private:
     std::unique_ptr<ShaderResource> m_shaderResource{nullptr};
 
     bool m_running{false};
+    // 暂停状态下的一次性刷新请求（seek后显示目标帧）：
+    // 拉到帧渲染后或超时后撤销，期间持续轮询，不进入常驻渲染循环
+    bool m_refreshPending{false};
+    std::chrono::steady_clock::time_point m_refreshDeadline{};
 
 #ifdef _WIN32
     ID3D11Device* m_device{nullptr};

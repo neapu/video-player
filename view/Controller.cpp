@@ -5,6 +5,11 @@
 namespace {
 constexpr int64_t MIN_INT64 = std::numeric_limits<int64_t>::min();
 
+// seek落定时接受的帧pts窗口（微秒）：窗口外的Normal帧视为seek前的旧帧或待跳过的过渡帧丢弃
+constexpr int64_t SEEK_TOLERANCE_US = 500000;
+// seek落定前连续丢弃音频帧的上限，超过后无条件接受，防止异常流导致永久静音
+constexpr int AUDIO_SEEK_DROP_LIMIT = 50;
+
 int64_t steadyClockUs()
 {
     using namespace std::chrono;
@@ -61,8 +66,15 @@ void Controller::openFile(const QString& filePath, bool tryHw)
         // 投递到GUI线程
         QMetaObject::invokeMethod(this, [this]{ stop(); }, Qt::QueuedConnection);
     };
-    opts.onSeekComplete = [](media::SeekError err) {
-        // Handle seek complete
+    opts.onSeekComplete = [this](media::SeekError err) {
+        // demux线程触发，投递到GUI线程
+        QMetaObject::invokeMethod(this, [this, err] {
+            if (err == media::SeekError::None) {
+                qDebug() << "Seek complete";
+            } else {
+                qWarning() << "Seek failed:" << static_cast<int>(err);
+            }
+        }, Qt::QueuedConnection);
     };
 
     auto mediaSourceExp = IMediaSource::create(opts);
@@ -146,12 +158,20 @@ void Controller::openFile(const QString& filePath, bool tryHw)
     m_audioPlayedUs = 0;
     m_audioEnded = false;
     m_pendingVideoFrame.reset();
+    m_videoSeekTargetUs.store(SEEK_IDLE);
+    m_audioSeekTargetUs.store(SEEK_IDLE);
+    m_audioSeekDropCount = 0;
 
     if (m_audioRenderer) {
         auto ret = m_audioRenderer->start(
             [this] { return nextAudioFrame(); },
             // 音频回调线程触发，按可听位置校准时钟
             [this](int64_t audibleUs) {
+                // seek未落定时设备里可能还在消费旧位置的样本，
+                // 此时不校准时钟，落定后位置会由新帧的pts重新同步
+                if (m_audioSeekTargetUs.load() != SEEK_IDLE) {
+                    return;
+                }
                 emit positionChanged(audibleUs);
                 QMutexLocker locker(&m_clock.mutex);
                 reanchorClock(audibleUs, locker);
@@ -204,6 +224,48 @@ void Controller::pauseOrResume()
         m_videoSink->resume();
         if (m_audioRenderer) m_audioRenderer->resume();
         setState(State::Playing);
+    }
+}
+
+void Controller::seek(int64_t targetUs)
+{
+    if (state() == State::Stopped || !m_mediaSource) {
+        return;
+    }
+
+    auto durationUs = duration();
+    if (targetUs < 0) {
+        targetUs = 0;
+    }
+    if (durationUs > 0 && targetUs > durationUs) {
+        targetUs = durationUs;
+    }
+
+    // 先让音频回调线程丢弃在播的旧帧，再重锚时钟，
+    // 缩小时钟重锚后旧位置回调又把时钟拉回去的窗口
+    if (m_audioRenderer) {
+        m_audioRenderer->flush();
+    }
+
+    // 置seek标记：拉帧线程据此丢弃seek前的旧状态与旧帧（这些成员归各消费线程所有，
+    // GUI线程不能直接修改），首个新位置的帧到来后由消费线程清除标记（落定）
+    if (m_videoStreamIndex != -1) {
+        m_videoSeekTargetUs.store(targetUs);
+    }
+    if (m_audioStreamIndex.load() != -1) {
+        m_audioSeekTargetUs.store(targetUs);
+    }
+
+    {
+        QMutexLocker locker(&m_clock.mutex);
+        reanchorClock(targetUs, locker);
+    }
+
+    m_mediaSource->seek(targetUs);
+
+    // 暂停状态下渲染循环已停止，请求一次性刷新以显示目标帧
+    if (state() == State::Paused && m_videoStreamIndex != -1) {
+        m_videoSink->refresh();
     }
 }
 
@@ -260,6 +322,14 @@ view::Frame Controller::nextVideoFrame()
     const int64_t frameIntervalUs = static_cast<int64_t>(1000000 / m_videoFps);
 
     while (true) {
+        // seek未落定：丢弃seek前残留的待播帧，重置pts推算与累计时长的基点
+        auto seekTarget = m_videoSeekTargetUs.load();
+        if (seekTarget != SEEK_IDLE) {
+            m_pendingVideoFrame.reset();
+            m_videoEnded = false;
+            m_videoPlayedUs = seekTarget;
+        }
+
         if (!m_pendingVideoFrame) {
             m_pendingVideoFrame = m_mediaSource->nextFrame(m_videoStreamIndex);
         }
@@ -275,6 +345,8 @@ view::Frame Controller::nextVideoFrame()
             return nullptr;
         } else if (m_pendingVideoFrame->type() == media::FrameType::End) {
             m_videoEnded = true;
+            // 流已结束，seek流程随之终止
+            m_videoSeekTargetUs.store(SEEK_IDLE);
             QMetaObject::invokeMethod(this, [this]{ endOfStream(); }, Qt::QueuedConnection);
             m_pendingVideoFrame.reset();
             return nullptr;
@@ -291,6 +363,18 @@ view::Frame Controller::nextVideoFrame()
             // 无效的pts，按累计的播放时长推算，写回后下游只需信任pts
             pts = m_videoPlayedUs;
             m_pendingVideoFrame->setPts(pts);
+        }
+
+        if (seekTarget != SEEK_IDLE) {
+            // seek落定前的过滤：只接受目标位置附近的帧。
+            // 更早的帧是seek点关键帧到目标之间的过渡帧（本就要跳过）；
+            // 更晚的帧只可能是seek前的残留旧帧（av_seek_frame回退保证新帧不会超过目标）
+            if (pts < seekTarget - SEEK_TOLERANCE_US || pts > seekTarget + SEEK_TOLERANCE_US) {
+                m_pendingVideoFrame.reset();
+                continue;
+            }
+            // 首个到达目标附近的帧，seek落定，恢复正常流程
+            m_videoSeekTargetUs.store(SEEK_IDLE);
         }
 
         // 如果大于媒体时间，先不渲染，本函数不能阻塞，等待下一次刷新请求
@@ -351,6 +435,14 @@ view::Frame Controller::nextAudioFrame()
     // 门禁的处罚条件为pts与时钟相差超过200ms，
     // 且只阻挡未到期的帧，不丢弃过期帧
     // 典型的场景是视频开头的静音部分（第一帧的pts不是从0开始）
+    // seek未落定：丢弃seek前残留的待播帧，重置pts推算与累计时长的基点
+    auto seekTarget = m_audioSeekTargetUs.load();
+    if (seekTarget != SEEK_IDLE) {
+        m_pendingAudioFrame.reset();
+        m_audioEnded = false;
+        m_audioPlayedUs = seekTarget;
+    }
+
     if (!m_pendingAudioFrame) {
         m_pendingAudioFrame = m_mediaSource->nextFrame(m_audioStreamIndex);
     }
@@ -364,6 +456,8 @@ view::Frame Controller::nextAudioFrame()
         return nullptr;
     } else if (m_pendingAudioFrame->type() == media::FrameType::End) {
         m_audioEnded = true;
+        // 流已结束，seek流程随之终止
+        m_audioSeekTargetUs.store(SEEK_IDLE);
         QMetaObject::invokeMethod(this, [this]{ endOfStream(); }, Qt::QueuedConnection);
         m_pendingAudioFrame.reset();
         return nullptr;
@@ -381,6 +475,21 @@ view::Frame Controller::nextAudioFrame()
         pts = m_audioPlayedUs;
         m_pendingAudioFrame->setPts(pts);
     }
+
+    if (seekTarget != SEEK_IDLE) {
+        // seek落定前的过滤：只丢弃远超目标位置的seek前残留旧帧
+        //（它们会卡住下面的到期门禁并占住待播槽），到达目标附近的帧即视为落定。
+        // 音频帧间隔小，不做下限过滤，避免稀疏音轨被误杀；
+        // 连续丢弃超限后无条件接受，防止异常流导致seek后永久静音
+        if (pts > seekTarget + SEEK_TOLERANCE_US && m_audioSeekDropCount < AUDIO_SEEK_DROP_LIMIT) {
+            ++m_audioSeekDropCount;
+            m_pendingAudioFrame.reset();
+            return nullptr;
+        }
+        m_audioSeekTargetUs.store(SEEK_IDLE);
+        m_audioSeekDropCount = 0;
+    }
+
     if (pts > mediaUs + 200000) {
         // 达到门禁条件，先不播放
         return nullptr;

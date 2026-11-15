@@ -6,6 +6,7 @@
 #include "rhi_video_renderer/QRhiVideoRenderer.h"
 #include "Controller.h"
 #include "components/PlayOrPauseButton.h"
+#include "components/PlaybackSlider.h"
 
 namespace view {
 
@@ -25,6 +26,8 @@ public:
 private:
     void createCentralWidget();
     void createMenu();
+    // 拖动预览：按进度条位置（毫秒）更新时间标签
+    void previewSeekPosition(int valueMs);
 
 private slots:
     void onPlayStateChanged(Controller::State state);
@@ -41,13 +44,16 @@ private:
     QRhiVideoRenderer* m_videoRenderer{nullptr};
 
     Controller* m_controller{nullptr};
-    QSlider* m_playbackBar{nullptr};
+    PlaybackSlider* m_playbackBar{nullptr};
     QSlider* m_volumeBar{nullptr};
 
     PlayOrPauseButton* m_playButton{nullptr};
     QPushButton* m_stopButton{nullptr};
     QLabel* m_timeLabel{nullptr};
     QString m_durationStr{};
+
+    // 进度条拖动中：只做位置/时间预览，不回写播放位置，松手后才seek
+    bool m_seeking{false};
     
 };
 } // namespace view

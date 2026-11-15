@@ -4,6 +4,8 @@
 #include <QMutex>
 #include <QMutexLocker>
 #include <optional>
+#include <atomic>
+#include <limits>
 #include "media/IMediaSource.h"
 #include "media/IMediaFrame.h"
 #include "VideoSink.h"
@@ -29,6 +31,10 @@ public:
     void openFile(const QString &filePath, bool tryHw = true);
     void pauseOrResume();
     void stop();
+
+    // 跳转到指定播放位置（微秒），Playing/Paused状态下有效；
+    // 异步执行：由媒体线程完成实际的seek，首个新位置的帧到来后视为落定
+    void seek(int64_t targetUs);
 
     void setState(State state);
     State state() const;
@@ -77,6 +83,15 @@ private:
     std::atomic_bool m_audioEnded{false};
     int64_t m_audioPlayedUs{0};
     media::MediaFramePtr m_pendingAudioFrame{nullptr};
+
+    // seek落定标记：GUI线程的seek()置位为目标位置（微秒），SEEK_IDLE表示无未落定的seek；
+    // 消费线程（渲染/音频回调）拉帧时读取，丢弃seek前的旧状态与旧帧，
+    // 首个新位置的帧（或End帧）到来后清除，视为落定
+    static constexpr int64_t SEEK_IDLE = std::numeric_limits<int64_t>::min();
+    std::atomic_int64_t m_videoSeekTargetUs{SEEK_IDLE};
+    std::atomic_int64_t m_audioSeekTargetUs{SEEK_IDLE};
+    // seek落定前连续丢弃旧音频帧的计数，超限后无条件接受下一帧兜底（仅音频回调线程访问）
+    int m_audioSeekDropCount{0};
 
     struct Clock {
         QMutex mutex;

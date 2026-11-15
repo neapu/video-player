@@ -1,6 +1,7 @@
 #pragma once
 #include <memory>
 #include <functional>
+#include <atomic>
 #include <miniaudio.h>
 #include "media/IMediaFrame.h"
 
@@ -27,6 +28,9 @@ public:
     void pause();
     void resume();
 
+    // 丢弃尚未播放的旧数据（如seek后），由音频回调线程在下一次回调开始时消费
+    void flush();
+
     // 取值 0.0 ~ 1.0
     void setVolume(float volume);
 
@@ -47,6 +51,7 @@ private:
     std::function<void(int64_t)> m_positionCallback;
     media::MediaFramePtr m_playingFrame;
     size_t m_playingOffset{0};
+    std::atomic_bool m_flushPending{false};
 
     // 设备内部缓冲时长（微秒），initialize 后实测，数据从写入到出声的延迟
     int64_t m_deviceBufferUs{0};
