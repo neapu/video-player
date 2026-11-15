@@ -18,15 +18,20 @@ qt_add_executable(${EXE_NAME}
     components/PlayOrPauseButton.cpp
     components/PlaybackSlider.h
     components/PlaybackSlider.cpp
+    components/VolumeButton.h
+    components/VolumeButton.cpp
 )
 
 qt_add_resources(${EXE_NAME} "player_icons"
     PREFIX "/icons"
     BASE "images"
-    FILES 
+    FILES
         images/play.svg
         images/pause.svg
         images/stop.svg
+        images/volume-up.svg
+        images/volume-down.svg
+        images/volume-mute.svg
 )
 
 # add_subdirectory(gl_video_renderer)

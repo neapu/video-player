@@ -127,12 +127,13 @@ void Controller::openFile(const QString& filePath, bool tryHw)
         return;
     }
 
-    // 启动解码前，先创建音频渲染器（不启动播放）
+    // 启动解码前，先创建音频渲染器（不启动播放）；渲染器每个文件重建，带上当前音量
     if (audioFormatOpt) {
         AudioRenderer::Options audioOpts{};
         audioOpts.sampleRate = audioSampleRate;
         audioOpts.channels = audioChannels;
         audioOpts.sampleFormat = *audioFormatOpt;
+        audioOpts.volume = m_volume / 100.0f;
         m_audioRenderer = AudioRenderer::create(audioOpts);
         if (!m_audioRenderer) {
             qCritical() << "Failed to create audio renderer";

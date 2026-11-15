@@ -7,6 +7,7 @@
 #include "Controller.h"
 #include "components/PlayOrPauseButton.h"
 #include "components/PlaybackSlider.h"
+#include "components/VolumeButton.h"
 
 namespace view {
 
@@ -45,7 +46,12 @@ private:
 
     Controller* m_controller{nullptr};
     PlaybackSlider* m_playbackBar{nullptr};
-    QSlider* m_volumeBar{nullptr};
+    PlaybackSlider* m_volumeBar{nullptr};
+    VolumeButton* m_muteButton{nullptr};
+    QLabel* m_volumeLabel{nullptr};
+
+    // 静音前的音量，用于取消静音时恢复
+    int m_volumeBeforeMute{100};
 
     PlayOrPauseButton* m_playButton{nullptr};
     QPushButton* m_stopButton{nullptr};

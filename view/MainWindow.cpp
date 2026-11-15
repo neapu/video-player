@@ -82,13 +82,18 @@ void MainWindow::createCentralWidget()
     m_playbackBar = new PlaybackSlider(Qt::Horizontal, central);
     m_playbackBar->setEnabled(false);
     bar1->addWidget(m_playbackBar, 1);
-    m_volumeBar = new QSlider(Qt::Horizontal, central);
+    m_muteButton = new VolumeButton(central);
+    bar1->addWidget(m_muteButton);
+    // 复用PlaybackSlider的点击定位行为：点音量条任意位置直接设为该处音量
+    m_volumeBar = new PlaybackSlider(Qt::Horizontal, central);
     m_volumeBar->setMaximumWidth(100);
     m_volumeBar->setMinimumWidth(100);
     m_volumeBar->setMaximum(100);
     m_volumeBar->setMinimum(0);
     m_volumeBar->setValue(100);
     bar1->addWidget(m_volumeBar);
+    m_volumeLabel = new QLabel("100%", central);
+    bar1->addWidget(m_volumeLabel);
     layout->addLayout(bar1);
 
     auto* bar2 = new QHBoxLayout(central);
@@ -118,6 +123,21 @@ void MainWindow::createCentralWidget()
     connect(m_playbackBar, &QSlider::sliderReleased, this, [this] {
         m_seeking = false;
         m_controller->seek(static_cast<int64_t>(m_playbackBar->value()) * 1000);
+    });
+
+    // 音量：所有变更（拖动、点击、静音/恢复）收敛到valueChanged一条路径统一生效
+    connect(m_volumeBar, &QSlider::valueChanged, this, [this](int value) {
+        m_controller->setVolume(value);
+        m_volumeLabel->setText(QString("%1%").arg(value));
+        m_muteButton->setVolume(value);
+    });
+    connect(m_muteButton, &VolumeButton::clicked, this, [this] {
+        if (m_volumeBar->value() > 0) {
+            m_volumeBeforeMute = m_volumeBar->value();
+            m_volumeBar->setValue(0);
+        } else {
+            m_volumeBar->setValue(m_volumeBeforeMute > 0 ? m_volumeBeforeMute : 100);
+        }
     });
 }
 
