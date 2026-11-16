@@ -6,64 +6,11 @@
 #include "SwrConvertor.h"
 #include "DecodeProbe.h"
 #include "HwFrameDownloader.h"
-#ifdef _WIN32
-#include <dxgi.h>
-#include <wrl/client.h>
-#include <vector>
-#endif
 
 namespace media {
 std::expected<std::unique_ptr<IMediaSource>, CreateError> IMediaSource::create(const Options& options)
 {
     return MediaSource::create(options);
-}
-
-std::vector<GpuInfo> IMediaSource::enumerateGpus()
-{
-    std::vector<GpuInfo> gpus{};
-#ifdef _WIN32
-    Microsoft::WRL::ComPtr<IDXGIFactory1> factory;
-    if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(factory.GetAddressOf())))) {
-        return gpus;
-    }
-    int index = 0;
-    for (UINT i = 0; ; i++) {
-        Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter;
-        if (factory->EnumAdapters1(i, adapter.GetAddressOf()) == DXGI_ERROR_NOT_FOUND) {
-            break;
-        }
-        DXGI_ADAPTER_DESC1 desc{};
-        adapter->GetDesc1(&desc);
-        if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) {
-            continue;
-        }
-        GpuInfo info{};
-        info.index = index++;
-        for (const auto* c = desc.Description; *c != L'\0'; ++c) {
-            info.name.push_back(static_cast<char>(*c));
-        }
-        info.luidHigh = desc.AdapterLuid.HighPart;
-        info.luidLow = desc.AdapterLuid.LowPart;
-        gpus.push_back(std::move(info));
-    }
-#endif
-    return gpus;
-}
-
-int IMediaSource::gpuIndexByAdapterLuid(const void* adapterLuid)
-{
-#ifdef _WIN32
-    if (!adapterLuid) {
-        return -1;
-    }
-    auto* luid = static_cast<const LUID*>(adapterLuid);
-    for (const auto& gpu : enumerateGpus()) {
-        if (gpu.luidHigh == static_cast<uint32_t>(luid->HighPart) && gpu.luidLow == luid->LowPart) {
-            return gpu.index;
-        }
-    }
-#endif
-    return -1;
 }
 
 MediaSource::~MediaSource()
@@ -422,10 +369,12 @@ void MediaSource::stop()
         m_packetCache->resume();
     }
     // 全量复位：移除所有已启用的流(解码线程与队列随 worker 销毁)，demuxer 回到文件开头，
-    // 未完成的 seek 请求一并作废。stop() 幂等，未运行时调用同样执行复位
+    // 未完成的 seek 请求一并作废。stop() 幂等，未运行时调用同样执行复位。
+    // packetCache 可能为空：initialize 中 Demuxer 创建失败提前返回时（如文件不存在），
+    // 析构照样走 stop()
     m_seekTarget.store(AV_NOPTS_VALUE);
     m_decodeWorkers.clear();
-    if (m_packetCache->seek(0) < 0) {
+    if (m_packetCache && m_packetCache->seek(0) < 0) {
         LOG_ERROR(m_logger, "Failed to seek to beginning on stop, demuxer position is not reset");
     }
 }

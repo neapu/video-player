@@ -34,9 +34,9 @@ public:
     virtual void refresh() {}
 
 #ifdef _WIN32
-    // 渲染设备所在适配器的 LUID（指向 DXGI_LUID，随 VideoSink 生命周期有效）；
-    // 渲染器无 D3D11 设备时返回 nullptr。用于 media 层的同 GPU 探测与解码 GPU 自动选择
-    virtual void* adapterLuid() { return nullptr; }
+    // 渲染设备所在 GPU 的序号（view::enumerateGpus() 的序号空间，与 media 解码适配器序号一致）；
+    // 渲染器无 D3D11 设备或未知时返回 -1。供 Controller 做解码 GPU 自动跟随与跨 GPU 降级决策
+    virtual int renderGpuIndex() const { return -1; }
 #endif
 };
 } // namespace view

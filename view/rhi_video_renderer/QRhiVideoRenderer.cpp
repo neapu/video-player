@@ -1,9 +1,7 @@
 #include "QRhiVideoRenderer.h"
 #include <QDebug>
 #include <QFile>
-#ifdef _WIN32
-#include <dxgi.h>
-#endif
+#include "../GpuUtil.h"
 
 namespace {
 QShader loadShader(const QString& path)
@@ -189,18 +187,9 @@ void QRhiVideoRenderer::initialize(QRhiCommandBuffer* cb)
         // （帧循环与本渲染器的跨设备拷贝），单线程无并发，无需 SetMultithreadProtected
         m_device = device;
         m_context = context;
-        // 记录渲染设备所在适配器 LUID，供 media 层做同 GPU 探测与解码 GPU 自动选择
-        Microsoft::WRL::ComPtr<IDXGIDevice> dxgiDevice;
-        Microsoft::WRL::ComPtr<IDXGIAdapter> adapter;
-        DXGI_ADAPTER_DESC desc{};
-        if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&dxgiDevice)))
-            && SUCCEEDED(dxgiDevice->GetAdapter(adapter.GetAddressOf()))
-            && SUCCEEDED(adapter->GetDesc(&desc))) {
-            m_adapterLuid = desc.AdapterLuid;
-            m_adapterLuidValid = true;
-            qInfo() << "Render adapter LUID:" << Qt::hex
-                    << static_cast<quint32>(desc.AdapterLuid.HighPart) << desc.AdapterLuid.LowPart;
-        }
+        // 解析渲染设备所在 GPU 序号，供 Controller 做解码 GPU 自动跟随与跨 GPU 降级决策
+        m_renderGpuIndex = view::gpuIndexOfDevice(device);
+        qInfo() << "Render GPU index:" << m_renderGpuIndex;
     }
 #endif
     // 纹理坐标原点在左上角，而QRhi的默认坐标原点在左下角，所以需要翻转v坐标

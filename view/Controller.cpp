@@ -532,15 +532,14 @@ std::optional<view::PixelFormat> Controller::enableVideoStream(media::VideoDecod
     }
 #ifdef _WIN32
     if (decodeMode != media::VideoDecodeMode::Software) { // 硬解码模式（直渲染或软渲染）
-        // 渲染适配器 LUID：解析渲染 GPU 序号，实现 Auto 跟随渲染 GPU 与跨 GPU 降级。
-        // 为空说明渲染器无 D3D11 设备，GPU 帧路径不可用
-        auto* renderLuid = m_videoSink->adapterLuid();
-        if (renderLuid) {
-            const int renderGpu = media::IMediaSource::gpuIndexByAdapterLuid(renderLuid);
+        // 渲染 GPU 序号：实现 Auto 跟随渲染 GPU 与跨 GPU 降级。
+        // 为 -1 说明渲染器无 D3D11 设备，GPU 帧路径不可用
+        const int renderGpu = m_videoSink->renderGpuIndex();
+        if (renderGpu >= 0) {
             // Auto(-1) 时解码 GPU 跟随渲染 GPU
-            int decodeAdapterIndex = decodeGpu >= 0 ? decodeGpu : (renderGpu >= 0 ? renderGpu : 0);
+            int decodeAdapterIndex = decodeGpu >= 0 ? decodeGpu : renderGpu;
             // 同 GPU 探测：跨 GPU 的共享句柄拷贝不可靠，硬解直渲染自动降级为硬解软渲染
-            if (decodeMode == media::VideoDecodeMode::Hardware && renderGpu >= 0 && decodeAdapterIndex != renderGpu) {
+            if (decodeMode == media::VideoDecodeMode::Hardware && decodeAdapterIndex != renderGpu) {
                 qWarning() << "Decode GPU" << decodeAdapterIndex << "differs from render GPU" << renderGpu
                            << ". Fallback to hardware download";
                 decodeMode = media::VideoDecodeMode::HardwareDownload;
@@ -563,7 +562,7 @@ std::optional<view::PixelFormat> Controller::enableVideoStream(media::VideoDecod
                 qWarning() << "Enable hw decode failed. Use software decode";
             }
         } else {
-            qWarning() << "No D3D11 render adapter. Use software decode";
+            qWarning() << "Render GPU is unknown. Use software decode";
         }
     }
 #else

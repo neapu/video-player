@@ -20,7 +20,7 @@ public:
     void refresh() override;
 
 #ifdef _WIN32
-    void* adapterLuid() override { return m_adapterLuidValid ? &m_adapterLuid : nullptr; }
+    int renderGpuIndex() const override { return m_renderGpuIndex; }
 #endif
 
 signals:
@@ -51,9 +51,8 @@ private:
 #ifdef _WIN32
     ID3D11Device* m_device{nullptr};
     ID3D11DeviceContext* m_context{nullptr};
-    // 渲染设备所在适配器 LUID（initialize 时从 IDXGIDevice 取得）
-    LUID m_adapterLuid{};
-    bool m_adapterLuidValid{false};
+    // 渲染设备所在 GPU 序号（view::enumerateGpus() 序号空间），未知为 -1
+    int m_renderGpuIndex{-1};
 #endif
     bool m_clearFlag{false};
 };

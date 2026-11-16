@@ -3,6 +3,7 @@
 #include <QMenuBar>
 #include <QFileDialog>
 #include <QActionGroup>
+#include "GpuUtil.h"
 
 namespace {
 QPushButton* createIconButton(const QIcon& icon, const QString& toolTip, QWidget* parent = nullptr)
@@ -183,9 +184,9 @@ void MainWindow::createMenu()
         });
     };
     addGpuAction(tr("Auto"), -1);
-    const auto gpus = media::IMediaSource::enumerateGpus();
+    const auto gpus = view::enumerateGpus();
     for (const auto& gpu : gpus) {
-        addGpuAction(QString::fromStdString(gpu.name), gpu.index);
+        addGpuAction(gpu.name, gpu.index);
     }
     if (gpus.empty()) {
         gpuMenu->setEnabled(false);

@@ -13,6 +13,8 @@ qt_add_executable(${EXE_NAME}
     LogManager.h
     LogManager.cpp
     VideoSink.h
+    GpuUtil.h
+    GpuUtil.cpp
 
     components/PlayOrPauseButton.h
     components/PlayOrPauseButton.cpp

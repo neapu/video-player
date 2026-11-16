@@ -47,7 +47,8 @@ bool D3d11vaDecoder::createHardwareContext(const AVStream* stream)
     }
 
     // 解码与渲染设备解耦：这里按适配器序号自建 D3D11 设备，不再借用渲染器设备。
-    // 枚举非软件适配器，序号与 MediaSource::enumerateGpus() 的列表一致
+    // 枚举非软件适配器，序号空间约定与 view::enumerateGpus() 一致
+    // （同为"跳过 DXGI_ADAPTER_FLAG_SOFTWARE 后按 EnumAdapters1 顺序连续编号"），两处需保持同步修改
     Microsoft::WRL::ComPtr<IDXGIFactory1> factory;
     HRESULT hr = CreateDXGIFactory1(IID_PPV_ARGS(factory.GetAddressOf()));
     if (FAILED(hr)) {
