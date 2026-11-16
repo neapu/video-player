@@ -92,6 +92,13 @@ private:
     static constexpr int64_t SEEK_IDLE = std::numeric_limits<int64_t>::min();
     std::atomic_int64_t m_videoSeekTargetUs{SEEK_IDLE};
     std::atomic_int64_t m_audioSeekTargetUs{SEEK_IDLE};
+    // seek代数：每次seek()自增。onSeekComplete从demux线程投递到GUI线程，
+    // 可能与新的seek()并发，用代数丢弃过期回调
+    std::atomic_uint64_t m_seekSerial{0};
+    // seek失败后的恢复标记：失败时管线停留在原位置，目标位置的窗口过滤会一直丢帧，
+    // 改为接受下一帧并把时钟重锚到其实际pts，从流当前所在位置继续播放
+    std::atomic_bool m_videoRecoverPending{false};
+    std::atomic_bool m_audioRecoverPending{false};
     // seek落定前连续丢弃旧音频帧的计数，超限后无条件接受下一帧兜底（仅音频回调线程访问）
     int m_audioSeekDropCount{0};
 
